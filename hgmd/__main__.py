@@ -1,33 +1,21 @@
 import os
 import argparse
+import datetime
 
-from . import hgmd as md
+import pandas as pd
+import numpy as np
+
+from . import hgmd
+from . import visualize as vis
 import sys
-import multiprocessing 
+import multiprocessing
 import time
 import math
+#from docs.source import conf
 
 
-def main():
-    """Hypergeometric marker detection. Finds markers identifying a cluster.
-
-
-    Reads in data from single-cell RNA sequencing. Data is in the form of 3
-    CSVs: gene expression data by gene by cell, 2-D tSNE data by cell, and the
-    clusters of interest by cell. Creates a list of genes and a list of gene
-    pairs (including complements), ranked by hypergeometric and t-test
-    significance. The highest ranked marker genes generally best identify the
-    cluster of interest. Saves these lists to CSV and creates gene expression
-    visualizations.
-    """
-    # TODO: more precise description
-    # TODO: get X and L as CLI args
-
-    # TODO: get command line input instead of assigning directly
-    parser = argparse.ArgumentParser(
-        description=("Hypergeometric marker detection. Finds markers "
-                     "identifying a cluster.")
-    )
+def init_parser(parser):
+    """Initialize parser args."""
     parser.add_argument(
         'marker', type=str,
         help=("Marker file input")
@@ -60,7 +48,192 @@ def main():
         '-L', nargs='?', default=None,
         help="L argument for XL-mHG"
     )
-    args = parser.parse_args()
+    return parser
+
+
+def read_data(cls_path, tsne_path, marker_path, gene_path):
+    """
+    Reads in cluster series, tsne data, marker expression without complements
+    at given paths.
+    """
+    
+    cls_ser = pd.read_csv(
+        cls_path, index_col=0, names=['cell', 'cluster'], squeeze=True
+    )
+    tsne = pd.read_csv(
+        tsne_path, index_col=0, names=['cell', 'tSNE_1', 'tSNE_2']
+    )
+    #could be optimized to read and check against gene list simultaneously
+    #if this is being a bottleneck. Would require unboxing pd.read_csv though.
+    no_complement_marker_exp = pd.read_csv(
+        marker_path, index_col=0
+        ).rename_axis('cell')
+    #gene list filtering
+    #-------------#
+    if gene_path is None:
+        pass
+    else:
+        with open(gene_path, "r") as genes:
+            init_read = genes.read().splitlines()
+            master_str = init_read[0]
+            master_gene_list = master_str.split(",")
+            for column_name in no_complement_marker_exp.columns:
+                if column_name in master_gene_list:
+                    continue
+                else:
+                    no_complement_marker_exp.drop(column_name, axis=1, inplace=True)
+
+    #-------------#
+                    
+    return (cls_ser, tsne, no_complement_marker_exp, gene_path)
+
+def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_path,pickle_path,cluster_number):
+    #for cls in clusters:
+    # To understand the flow of this section, read the print statements.
+    print('########\n# Processing cluster ' + str(cls) + '...\n########')
+    print('Running t test on singletons...')
+    t_test = hgmd.batch_t(marker_exp, cls_ser, cls)
+    print('Running XL-mHG on singletons...')
+    xlmhg = hgmd.batch_xlmhg(marker_exp, cls_ser, cls, X=X, L=L)
+    # We need to slide the cutoff indices before using them,
+    # to be sure they can be used in the real world. See hgmd.mhg_slide()
+    cutoff_value = hgmd.mhg_cutoff_value(
+        marker_exp, xlmhg[['gene', 'mHG_cutoff']]
+    )
+    xlmhg = xlmhg[['gene', 'HG_stat', 'mHG_pval']].merge(
+        hgmd.mhg_slide(marker_exp, cutoff_value), on='gene'
+    )
+    # Update cutoff_value after sliding
+    cutoff_value = pd.Series(
+        xlmhg['cutoff_val'].values, index=xlmhg['gene']
+    )
+    print('Creating discrete expression matrix...')
+    discrete_exp = hgmd.discrete_exp(marker_exp, cutoff_value)
+    #print(np.transpose(discrete_exp))
+    #print(discrete_exp)
+    print('Finding pair expression matrix...')
+    (
+        gene_map, in_cls_count, pop_count,
+        in_cls_product, total_product, upper_tri_indices,
+        ##NEW VALUES HERE
+        cluster_exp_matrices, cls_counts
+    ) = hgmd.pair_product(discrete_exp, cls_ser, cls, cluster_number)
+    #print(in_cls_product)
+    #print(total_product)
+    #print(in_cls_count)
+    #print(pop_count)
+
+    #print('Finding Trips expression matrix...')
+    #trips = hgmd.combination_product(discrete_exp,cls_ser,cls)
+    print('end of func')
+    time.sleep(1000)
+    HG_start = time.time()
+    print('Running hypergeometric test on pairs...')
+    pair = hgmd.pair_hg(
+        gene_map, in_cls_count, pop_count,
+        in_cls_product, total_product, upper_tri_indices
+    )
+    HG_end = time.time()
+    print(str(HG_end-HG_start) + ' seconds')
+    print('Finding simple true positives/negatives for singletons...')
+    #Gives us the singleton TP/TNs for COI and for rest of clusters
+    #COI is just a DF, rest of clusters are a dict of DFs
+    (sing_tp_tn, other_sing_tp_tn) = hgmd.tp_tn(discrete_exp, cls_ser, cls, cluster_number)
+
+
+
+    # Pair TP/TN FOR THIS CLUSTER
+    print('Finding simple true positives/negatives for pairs...')
+    pair_tp_tn = hgmd.pair_tp_tn(
+        gene_map, in_cls_count, pop_count,
+        in_cls_product, total_product, upper_tri_indices
+    )
+
+    #accumulates pair TP/TN vals for all other clusters
+    ##NEW
+    other_pair_tp_tn = {}
+    for key in cluster_exp_matrices:
+        new_pair_tp_tn = hgmd.pair_tp_tn(
+            gene_map, cls_counts[key], pop_count,
+            cluster_exp_matrices[key], total_product, upper_tri_indices
+        )
+        other_pair_tp_tn[key] = new_pair_tp_tn
+        other_pair_tp_tn[key].set_index(['gene_1','gene_2'],inplace=True)
+
+    rank_start = time.time()
+    print('Finding NEW Rank')
+    ranked_pair = hgmd.ranker(pair,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in_cls_count)
+    rank_end = time.time()
+    print(str(rank_end - rank_start) + ' seconds')
+    
+    # Save TP/TN values to be used for non-cluster-specific things
+    print('Pickling data for later...')
+    sing_tp_tn.to_pickle(pickle_path + 'sing_tp_tn_' + str(cls))
+    pair_tp_tn.to_pickle(pickle_path + 'pair_tp_tn_' + str(cls))
+    print('Exporting cluster ' + str(cls) + ' output to CSV...')
+    sing_output = xlmhg\
+        .merge(t_test, on='gene')\
+        .merge(sing_tp_tn, on='gene')\
+        .set_index('gene')\
+        .sort_values(by='HG_stat', ascending=True)
+    sing_output['rank'] = sing_output.reset_index().index + 1
+    sing_output.to_csv(
+        csv_path + '/cluster_' + str(cls) + '_singleton.csv'
+    )
+    sing_stripped = sing_output[
+        ['HG_stat', 'TP', 'TN']
+    ].reset_index().rename(index=str, columns={'gene': 'gene_1'})
+    
+    ##########
+    #change to reflect ranked_pair
+    ##########
+    #print('yabada')
+    #print(pair)
+    pair_output = ranked_pair\
+        .merge(pair_tp_tn, on=['gene_1', 'gene_2'], how='left')
+    #print(pair)
+    #pair_output['rank'] = pair_output.reset_index().index + 1
+    pair_output.to_csv(
+        csv_path + '/cluster_' + str(cls) + '_pair.csv'
+    )
+    print('Drawing plots...')
+    vis.make_plots(
+        pair=pair_output,
+        sing=sing_output,
+        tsne=tsne,
+        discrete_exp=discrete_exp,
+        marker_exp=marker_exp,
+        plot_pages=plot_pages,
+        combined_path=vis_path + '/cluster_' + str(cls) + '_combined.pdf',
+        sing_combined_path=vis_path + '/cluster_' +
+        str(cls) + '_singleton_combined.pdf',
+        discrete_path=vis_path + '/cluster_' + str(cls) + '_discrete.pdf',
+        tptn_path=vis_path + 'cluster_' + str(cls) + '_TP_TN.pdf',
+        sing_tptn_path=vis_path + 'cluster_' +
+        str(cls) + '_singleton_TP_TN.pdf'
+    )
+
+
+def main():
+    """Hypergeometric marker detection. Finds markers identifying a cluster.
+
+    Reads in data from single-cell RNA sequencing. Data is in the form of 3
+    CSVs: gene expression data by gene by cell, 2-D tSNE data by cell, and the
+    clusters of interest by cell. Creates a list of genes and a list of gene
+    pairs (including complements), ranked by hypergeometric and t-test
+    significance. The highest ranked marker genes generally best identify the
+    cluster of interest. Saves these lists to CSV and creates gene expression
+    visualizations.
+    """
+    # TODO: more precise description
+
+    start_dt = datetime.datetime.now()
+    start_time = time.time()
+    print("Started on " + str(start_dt.isoformat()))
+    args = init_parser(argparse.ArgumentParser(
+        description=("Hypergeometric marker detection. Finds markers "
+                     "identifying a cluster.")
+    )).parse_args()
     output_path = args.output_path
     C = args.C
     X = args.X
@@ -69,8 +242,19 @@ def main():
     tsne_file = args.tsne
     cluster_file = args.cluster
     gene_file = args.g
-    min_exp_ratio = 0.4
+    plot_pages = 30  # number of genes to plot (starting with highest ranked)
 
+    # TODO: gene pairs with expression ratio within the cluster of interest
+    # under [min_exp_ratio] were ignored in hypergeometric testing. This
+    # functionality is currently unimplemented.
+    # min_exp_ratio = 0.4
+
+    csv_path = output_path + 'data/'
+    vis_path = output_path + 'vis/'
+    pickle_path = output_path + '_pickles/'
+    os.makedirs(csv_path, exist_ok=True)
+    os.makedirs(vis_path, exist_ok=True)
+    os.makedirs(pickle_path, exist_ok=True)
     if C is not None:
         C = int(C)
     else:
@@ -83,37 +267,35 @@ def main():
         print("Set L to " + str(L) + ".")
     print("Reading data...")
     if gene_file is None:
-        cell_data = md.get_cell_data(
-            marker_path=(marker_file),
-            tsne_path=(tsne_file),
-            cluster_path=(cluster_file),
-            gene_list = None
-            )
+        (cls_ser, tsne, no_complement_marker_exp, gene_path) = read_data(
+            cls_path=cluster_file,
+            tsne_path=tsne_file,
+            marker_path=marker_file,
+            gene_path=None
+        )
     else:
-        cell_data = md.get_cell_data(
-            marker_path=(marker_file),
-            tsne_path=(tsne_file),
-            cluster_path=(cluster_file),
-            gene_list=(gene_file)
-            )
+        (cls_ser, tsne, no_complement_marker_exp, gene_path) = read_data(
+            cls_path=cluster_file,
+            tsne_path=tsne_file,
+            marker_path=marker_file,
+            gene_path=gene_file
+        )
+    print("Generating complement data...")
+    marker_exp = hgmd.add_complements(no_complement_marker_exp)
 
-    # Enumerate clusters and process each individually in its own folder.
-    # pair_data also contains singleton data, but singleton is just
-    # singleton.
-    clusters = cell_data['cluster'].unique()
+
+    
+    # Process clusters sequentially
+    clusters = cls_ser.unique()
     clusters.sort()
-    plot_pages = len(clusters)
-    plot_genes = len(clusters)
-    print('BEEP BOOP')
-    print(clusters)
-    start_time = time.time()
 
 
     #Below could probably be optimized a little (new_clust not necessary),
     #instead of new clust just go from (x-1)n to (x)n in clusters
-    #but it works for now and the complexity it adds is trivial
+    #but it works for now and the complexity it adds is trivial and it makes debugging easier
     #cores is number of simultaneous threads you want to run, can be set at will
     cores = C
+    cluster_number = len(clusters)
     # if core number is bigger than number of clusters, just set it equal to number of clusters
     if cores > len(clusters):
         cores = len(clusters)
@@ -127,9 +309,9 @@ def main():
         #workers assigned based on the new_clusters list which is the old clusters
         #split up based on core number e.g.
         #clusters = [1 2 3 4 5 6] & cores = 4 --> new_clusters = [1 2 3 4], new_clusters = [5 6]
-        for cluster in new_clusters:
-            p = multiprocessing.Process(target=md.process,
-                args=(cluster,cell_data,X,L,min_exp_ratio,plot_pages,plot_genes,output_path))
+        for cls in new_clusters:
+            p = multiprocessing.Process(target=process,
+                args=(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_path,pickle_path,cluster_number))
             jobs.append(p)
             p.start()
         p.join()
@@ -140,11 +322,20 @@ def main():
 
     end_time = time.time()
 
+    
+
+    # Add text file to keep track of everything
+    end_dt = datetime.datetime.now()
+    print("Ended on " + end_dt.isoformat())
+    metadata = open(output_path + 'metadata.txt', 'w')
+    metadata.write("Started: " + start_dt.isoformat())
+    metadata.write("\nEnded: " + end_dt.isoformat())
+    metadata.write("\nElapsed: " + str(end_dt - start_dt))
+    #metadata.write("\nGenerated by COMET version " + conf.version)
+
+
     print('Took ' + str(end_time-start_time) + ' seconds')
     print('Which is ' + str( (end_time-start_time)/60 ) + ' minutes')
-
-    print("All set!!! Enjoy your PDFs and CSVs.")
-
 
 if __name__ == '__main__':
     main()

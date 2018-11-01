@@ -1,1388 +1,677 @@
-# import re
+"""
+Set of modularized components of COMET's HGMD testing.
+
+For marker expression, float comparisions are fuzzy to 1e-3.  Marker expression
+must therefore be normalized to a point where a difference of 0.001 is
+insignificant.  I.e. 15.001 and 15.000 are treated as equivalent expression
+values.
+"""
+
+import re
+
 import pandas as pd
 import numpy as np
 import xlmhg as hg
-import os
 import scipy.stats as ss
-import matplotlib.pyplot as plt
-from matplotlib import cm
-from matplotlib.backends.backend_pdf import PdfPages
+import time
+
+# TODO: idea, replace 'gene_1', 'gene_2', and 'gene' columns with
+# indices/multi-indices
+
+# Used for comparision of marker expression values.
+FLOAT_PRECISION = 0.001
 
 
-#Single process, multiprocessed in parallel
-def process(cluster,cell_data,X,L,min_exp_ratio,plot_pages,plot_genes,output_path):
-    #print("Processing cluster " + str(cluster) + "...")
-    cluster_path = output_path + "/cluster_" + str(cluster) + "/"
-    os.makedirs(cluster_path, exist_ok=True)
-    #print("Testing singletons...")
-    singleton_data = singleton_test(cell_data, cluster, X, L)
-    #print("Testing pairs...")
-    pair_data = pair_test(
-        cell_data, singleton_data, cluster, L, min_exp_ratio
-    )
-    #print("Calculating true positive/negative rates...")
-    singleton_data, pair_data = find_TP_TN(
-        cell_data, singleton_data, pair_data, cluster
-    )
-    #print("Calculating weighted TP/TN rates...")
-    singleton_data, pair_data = find_weighted_TP_TN(
-        cell_data, singleton_data, pair_data, cluster
-    )
-    #print("Saving to CSV...")
-    singleton_data.to_csv(cluster_path + "singleton_data.csv")
-    pair_data.to_csv(cluster_path + "pair_data.csv")
-    #print("Done.")
-    #print("Plotting true positive/negative rates...")
-    make_TP_TN_plots(
-        cell_data, singleton_data, pair_data, plot_genes,
-        pair_path=(cluster_path + "TP_TN_plot.pdf"),
-        singleton_path=(cluster_path + "singleton_TP_TN_plot.pdf")
-    )
-    #print("Done.")
-    #print("Plotting discrete expression...")
-    make_discrete_plots(
-        cell_data, singleton_data, pair_data, plot_pages,
-        path=(cluster_path + "discrete_plots.pdf"),
-    )
-    #print("Done.")
-    #print("Plotting continuous expresssion...")
-    make_combined_plots(
-        cell_data, singleton_data, pair_data, plot_pages,
-        pair_path=(cluster_path + "combined_plot.pdf"),
-        singleton_path=(cluster_path + "singleton_combined_plot.pdf")
-    )
-    print("Done with cluster " + str(cluster))
+def add_complements(marker_exp):
+    """Adds columns representing gene complement to a gene expression matrix.
 
-    
+    Gene complements are represented simplistically: gene expression values for
+    a given gene X are multiplied by -1 and become a new column, labeled X_c.
+    "High" expression values of X become "low" values of X_c, and vice versa,
+    where discrete expression corresponds to a "high" value, and discrete
+    non-expression to a "low" value.
 
-def round_to_6(input_value):
-    """Rounds a value to 6 significant figures."""
+    marker_exp should have cell row labels, gene column labels, gene expression
+    float values.
 
-    from decimal import ROUND_HALF_EVEN, Context
-    ctx = Context(prec=6, rounding=ROUND_HALF_EVEN)
-    return float(ctx.create_decimal(input_value))
+    :param marker_exp: gene expression DataFrame whose rows are cell
+        identifiers, columns are gene identifiers, and values are float values
+        representing gene expression.
 
+    :returns: A DataFrame of same format as marker_exp, but with a new column
+              added for each existing column label, representing the column
+              label gene's complement.
 
-def fuzzy_rank(series):
-    """Ranks a series of floats with 1e-6 relative fuzziness."""
-
-    series = series.apply(round_to_6)
-    return series.rank()
-
-
-def get_discrete_exp(cells, singleton):
-    """Creates discrete expression matrix using given cutoff."""
-
-    exp = pd.DataFrame()
-    for gene in cells.columns[3:]:
-        cutoff = (
-            singleton[
-                singleton['gene'] == gene
-            ]['mHG_cutoff_value'].iloc[0]
-        )
-
-        equal = pd.Series(np.isclose(cells[gene], cutoff))
-        equal.index = cells.index
-        less_than = cells[gene] < cutoff
-        greater_than = ~(equal | less_than)
-        exp[gene] = greater_than.astype(int)
-
-    return exp
-
-
-def get_cell_data(marker_path, tsne_path, cluster_path, gene_list):
-    """Parses cell data into a DataFrame, raising exceptions as necessary.
-
-
-    Combines data at given paths into a single DataFrame. Assumes standard csv
-    format, with each row corresponding to a single cell, and each column
-    either to a single gene, a tSNE score, or a cluster identifier.
-
-    Args:
-        marker_path: Path to file containing gene expression data.
-        tsne_path: Path to file containing tSNE score data.
-        cluster_path: Path to file containing cluster data.
-
-    Returns:
-        A single pandas DataFrame incorporating all cell data. Row values are
-        cell identifiers. The first column is cluster number. The 2nd and 3rd
-        columns are tSNE_1 and tSNE_2 scores. All following columns are gene
-        names, in the order given by the file at tsne_path.
-
-    Raises:
-        OSError: An error occurred accessing the files at marker_path,
-            tsne_path, and cluster_path.
-        ValueError: The files at marker_path, tsne_path, and cluster_path have
-            inappropriate formatting.
-        ValueError: The data contained in the files at marker_path, etc. is
-            invalid.
-    """
-    #change to reflect gene cross referencing
-    #delete columns that don't show in both lists
-    if gene_list is None:
-        cell_data = pd.read_csv(marker_path, index_col=0)
-    else:
-        cell_data = pd.read_csv(marker_path, index_col=0)
-        #genes must be one single line, comma delimited
-        with open(gene_list, "r") as genes:
-            init_read = genes.read().splitlines()
-            master_str = init_read[0]
-            master_gene_list = master_str.split(",")
-        #master_gene_list contains all relevant genes
-        #now to check them versus the columns in the dataframe
-        #print(cell_data.shape)
-        for column_name in cell_data.columns:
-            if column_name in master_gene_list:
-                   continue
-            else:
-                cell_data.drop(column_name, axis=1,inplace = True)
-        #print(cell_data.shape)
-    
-    cluster_data = pd.read_csv(cluster_path, header=None, index_col=0)
-    # TODO: are these assignments necessary?
-    cluster_data = cluster_data.rename(index=str, columns={1: "cluster"})
-    tsne_data = pd.read_csv(tsne_path, header=None, index_col=0)
-    tsne_data = tsne_data.rename(index=str, columns={1: "tSNE_1", 2: "tSNE_2"})
-    cell_data = pd.concat(
-        [cluster_data, tsne_data, cell_data], axis=1, sort=False
-    ).rename_axis(None)
-    # To get the complements of each gene, simply negate them. This makes
-    # sorting and our algorithms work in the "opposite direction."
-    for gene in cell_data.columns[3:]:
-        cell_data[gene + "_c"] = -cell_data[gene]
-
-    return cell_data
-
-
-def singleton_test(cells, cluster, X=None, L=None):
-    """Tests and ranks genes and complements using the XL-mHG test and t-test.
-
-
-    Applies the XL-mHG test and t-test to each gene (and its complement) found
-    in the columns of cells using the specified cluster of interest, then
-    ranks genes by both mHG p-value and by t-test p-value. Specifically, the
-    XL-mHG test calculates the expression cutoff value that best differentiates
-    the cluster of interest from the cell population, then calculates the
-    cluster's significance value using the hypergeometric and t-test. The final
-    rank is the average of these two ranks.  Returns a pandas DataFrame with
-    test and rank data by gene.
-
-    Args:
-        cells: A DataFrame with format matching those returned by
-            get_cell_data. Row values are cell identifiers, columns are first
-            cluster identifier, then tSNE_1 and tSNE_2, then gene names.
-        cluster: The cluster of interest. Must be in cells['cluster'].values.
-        X: A parameter of the XL-mHG test. An integer specifying the minimum
-            number of cells in-cluster that should express the gene. Defaults
-            to 15% of the cell count.
-        L: A parameter of the XL-mHG test. An integer specifying the maximum
-            number of cells that should express the gene. Defaults to 85% of
-            the cell count.
-
-    Returns:
-        A single pandas DataFrame incorporating test and rank data, sorted
-        by combined mHG and t rank. Row values are gene and complement names;
-        complements are named by appending '_c' to gene names. Column values
-        are:
-            'HG_stat': The HG test statistic, measuring significance of the
-                cluster at our given expression cutoff.
-            'mHG_pval': The significance of our chosen cutoff.
-            'mHG_cutoff_index': The expression cutoff index, for a list of all
-                cells sorted by expression (descending for normal genes,
-                ascending for their complements. Cells at the cutoff index or
-                after do not express, while cells before the cutoff index
-                express. The index starts at 0.
-            'mHG_cutoff_value': Similar to 'mHG_cutoff_index'. The expression
-                cutoff value. Cells above the cutoff express, while cells at or
-                below the cutoff do not express.
-            't_stat': The t-test statistic, measuring significance of the
-                cluster at our given expression cutoff.
-            't_pval': The p-value corresponding to the t-test statistic.
-            'rank': The average of the gene's 'mHG_pval' rank and 't_pval'
-                rank. Lower p-value is higher rank. A rank of 1 ("first") is
-                higher than a rank of 2 ("second").
-            'sequential_rank': Like rank, but goes from 1 to number of genes
-                without repeats.
-
-    Raises:
-        ValueError: cells is in an incorrect format, cluster is not in
-        cells['cluster'].values, X is greater than the cluster size or less
-        than 0, or L is less than X or greater than the population size.
+    :rtype: pandas.DataFrame
     """
 
-    output = pd.DataFrame(columns=[
-        'gene', 'HG_stat', 'mHG_pval', 'mHG_cutoff_index', 'mHG_cutoff_value',
-        't_stat', 't_pval'
-    ])
-    for index, gene in enumerate(cells.columns[3:]):
-        # Do XL-mHG and t-test for selected gene.
-        # XL-mHG requires two list inputs, exp and v:
-        # exp is a DataFrame with column values: cluster, gene expression.
-        # Row values are cells.
-        # v is boolean list of cluster membership. Uses 1s and 0s rather than
-        # True and False.
-        # Both exp and v are sorted by expression (descending).
-        print(
-            "Testing " + str(gene) + "... [" + str(index + 1) + "/"
-            + str(len(cells.columns[3:])) + "]"
-        )
-        exp = cells[['cluster', gene]]
-        exp = exp.sort_values(by=gene, ascending=False)
-        v = np.array((exp['cluster'] == cluster).tolist()).astype(int)
-        if X is None:
-            X = 1
-        if L is None:
-            L = cells.shape[0]
-        HG_stat, mHG_cutoff_index, mHG_pval = hg.xlmhg_test(v, X=X, L=L)
-        mHG_cutoff_value = exp.iloc[mHG_cutoff_index][gene]
-        # "Slide up" the cutoff index to where the gene expression actually
-        # changes. I.e. for array [5.3 1.2 0 0 0 0], if index == 4, the cutoff
-        # value is 0 and thus the index should actually slide to 2.
-        # numpy.searchsorted works with ascending, not descending lists.
-        # Therefore, negate to make it work.
-        mHG_cutoff_index = np.searchsorted(
-            -exp[gene].values, -mHG_cutoff_value, side='left'
-        )
-        # If index is 0 (all cells selected), slide to next value)
-        if np.isclose(mHG_cutoff_index, 0):
-            mHG_cutoff_index = np.searchsorted(
-                -exp[gene].values, -mHG_cutoff_value, side='right'
-            )
-            if mHG_cutoff_index == exp.shape[0]:
-                print(
-                    "WARNING: "
-                    + gene
-                    + " has uniform expression across the population!"
-                )
-            else:
-                mHG_cutoff_value = exp.iloc[mHG_cutoff_index][gene]
-        # TODO: reassigning sample and population every time is inefficient
-        sample = exp[exp['cluster'] == cluster]
-        population = exp[exp['cluster'] != cluster]
-        t_stat, t_pval = ss.ttest_ind(sample[gene], population[gene])
-        gene_data = pd.DataFrame(
-            {
-                'gene': gene, 'HG_stat': HG_stat, 'mHG_pval': mHG_pval,
-                'mHG_cutoff_index': mHG_cutoff_index,
-                'mHG_cutoff_value': mHG_cutoff_value,
-                't_stat': t_stat, 't_pval': t_pval,
-            },
-            index=[0]
-        )
-        output = output.append(gene_data, sort=False, ignore_index=True)
-
-    # Pandas doesn't play nice with floating point fuzziness. Use fuzzy_rank to
-    # deal with this.
-    HG_rank = fuzzy_rank(output['HG_stat'])
-    t_rank = fuzzy_rank(output['t_pval'])
-    combined_rank = pd.DataFrame({
-        'rank': HG_rank + t_rank,
-        'HG_rank': HG_rank,
-        't_rank': t_rank
-    })
-    output = output.join(combined_rank)
-    # Genes with the same rank will be sorted by HG statistic.
-    # Mergesort is stable.
-    output = output.sort_values(by='HG_rank', ascending=True)
-    output = output.sort_values(by='rank', ascending=True, kind='mergesort')
-    output['sequential_rank'] = output.reset_index().index + 1
-    return output
+    for gene in marker_exp.columns:
+        marker_exp[gene + '_c'] = -marker_exp[gene]
+    return marker_exp
 
 
-def pair_test(cells, singleton, cluster, L=None, min_exp_ratio=0.4):
-    """Tests and ranks pairs of genes using the hypergeometric test.
+def batch_xlmhg(marker_exp, c_list, coi, X=None, L=None):
+    """Applies XL-mHG test to a gene expression matrix, gene by gene.
 
+    Outputs a 3-column DataFrame representing statistical results of XL-mHG.
 
-    Uses output of singleton_test to apply the hypergeometric test to pairs of
-    genes, by finding the significance of the cluster of interest in the set of
-    cells expressing both genes. Then, ranks pairs by this significance.
-    Designed to use output of singleton_test. Output includes singleton data.
+    :param marker_exp: A DataFrame whose rows are cell identifiers, columns are
+        gene identifiers, and values are float values representing gene
+        expression.
+    :param c_list: A Series whose indices are cell identifiers, and whose
+        values are the cluster which that cell is part of.
+    :param coi: The cluster of interest.
+    :param X: An integer to be used as argument to the XL-mHG test.
+    :param L: An integer to be used as argument to the XL-mHG test.
 
-    Args:
-        cells: A DataFrame with format matching those returned by
-            get_cell_data. Row values are cell identifiers, columns are first
-            cluster identifier, then tSNE_1 and tSNE_2, then gene names.
-        singleton: A DataFrame with format matching those returned by
-            singleton_test.
-        cluster: The cluster of interest. Must be in cells['cluster'].values.
-        min_exp_ratio: The minimum expression ratio for consideration. Genes
-            which are expressed by a fraction of the cluster of interest less
-            than this value are ignored. Usually these genes are unhelpful,
-            and ignoring them helps with speed.
+    :returns: A matrix with arbitrary row indices, whose columns are the gene
+              name, stat, cutoff, and pval outputs of the XL-mHG test; of
+              float, int, and float type respectively.  Their names are 'gene',
+              'HG_stat', 'mHG_cutoff', and 'mHG_pval'.
 
-    Returns:
-        A single pandas DataFrame incorporating test data, sorted by HG test
-        statistic. Row values are unimportant. Column values are:
-            'gene': The first gene in the pair.
-            'gene_B': The second gene in the pair.
-            'HG_stat': The HG test statistic, measuring significance of the
-                cluster in the subset of cells which express both genes.
-
-    Raises:
-        ValueError: cells or singleton is in an incorrect format, cluster is
-            not in cells['cluster'].values, min_exp_ratio is not in the range
-            [0.0,1.0].
+    :rtype: pandas.DataFrame
     """
-
-    # create matrices with specifications:
-    # cluster_product: each cell has row gene and column gene; value is number
-    # of cells in cluster expressing both
-    # not_cluster_product: same except counting number of cells not in cluster
-    # expressing both
+    # * 1 converts to integer
+    mem_list = (c_list == coi) * 1
+    if X is None:
+        X = 1
     if L is None:
-        L = cells.shape[0]
-    cluster_list = cells.iloc[:, 0]
-    exp = get_discrete_exp(cells, singleton)
-    cluster_exp = exp[cluster_list == cluster]
-    not_cluster_exp = exp[cluster_list != cluster]
-    total_num = exp.shape[0]
-    cluster_size = cluster_exp.shape[0]
-    # DROP COLUMNS WITH cluster expression below threshold FROM ONLY MULTI DFs
-    # ALSO DROP COLUMNS with index>L
-    dropped_genes = list([])
-    for gene in cluster_exp.columns:
-        if cluster_exp[gene].sum() / float(cluster_size) < min_exp_ratio:
-            dropped_genes.append(gene)
-        elif (
-            singleton[singleton['gene'] == gene]['mHG_cutoff_index'].iloc[0]
-            > L
-        ):
-            dropped_genes.append(gene)
-
-    gene_list = np.setdiff1d(cluster_exp.columns.values, dropped_genes)
-    print(
-        "Dropped " + str(len(dropped_genes))
-        + " genes from multiple gene testing. Threshold is "
-        + str(min_exp_ratio)
-    )
-    cluster_product = cluster_exp.T.dot(cluster_exp)
-    not_cluster_product = not_cluster_exp.T.dot(not_cluster_exp)
-
-    output = pd.DataFrame(columns=['HG_stat'])
-    gene_count = len(gene_list)
-    for i in range(0, gene_count):
-        gene_A = gene_list[i]
-        print(
-            "[" + str(i+1) + "/" + str(gene_count) + "] Pairing "
-            + gene_A + "..."
+        L = marker_exp.shape[0]
+    xlmhg = marker_exp.apply(
+        lambda col:
+        hg.xlmhg_test(
+            mem_list.reindex(
+                col.sort_values(ascending=False).index
+            ).values,
+            X=X,
+            L=L
         )
-        # start gene_B iterating from index i+1 to prevent duplicate pairs
-        for gene_B in gene_list[i+1:]:
-            # For middle expression: pair gene with complement
-            num_exp_in_cluster = cluster_product.loc[gene_A, gene_B]
-            num_expressed = (
-                num_exp_in_cluster +
-                not_cluster_product.loc[gene_A, gene_B]
-            )
-            # skip if no intersection exists
-            if num_expressed == 0:
-                continue
-
-            HG_stat = ss.hypergeom.sf(
-                num_exp_in_cluster,
-                total_num,
-                cluster_size,
-                num_expressed,
-                loc=1
-            )
-            gene_df = pd.DataFrame(
-                {'HG_stat': HG_stat, 'gene': gene_A, 'gene_B': gene_B},
-                index=[0]
-            )
-            output = output.append(gene_df, sort=False, ignore_index=True)
-
-    output = singleton.append(output, sort=False, ignore_index=True)
-    # rerank by HG statistic and sort by HG only
-    # fuzzy_rank to avoid pandas issues with fuzziness
-    HG_rank = fuzzy_rank(output['HG_stat'])
-    output['HG_rank'] = HG_rank
-    output = output.sort_values(by='HG_rank', ascending=True)
-    # put gene_B in the 2nd place
-    output = output[['gene'] + ['gene_B'] + output.columns.tolist()[1:-1]]
-    output['sequential_rank'] = output.reset_index().index + 1
+    )
+    output = pd.DataFrame()
+    output['gene'] = xlmhg.index
+    output[['HG_stat', 'mHG_cutoff', 'mHG_pval']] = pd.DataFrame(
+        xlmhg.values.tolist(),
+        columns=['HG_stat', 'mHG_cutoff', 'mHG_pval']
+    )
     return output
 
 
-def find_TP_TN(cells, singleton, pair, cluster):
-    """Finds true positive/true negative rates, appends them to our DataFrames.
+def batch_t(marker_exp, c_list, coi):
+    """Applies t test to a gene expression matrix, gene by gene.
 
+    :param marker_exp: A DataFrame whose rows are cell identifiers, columns are
+        gene identifiers, and values are float values representing gene
+        expression.
+    :param c_list: A Series whose indices are cell identifiers, and whose
+        values are the cluster which that cell is part of.
+    :param coi: The cluster of interest.
 
-    Uses output of singleton_test and pair_test to find true positive and true
-    negative rates for gene expression relative to the cluster of interest.
-    Appends rates to these output DataFrames.
+    :returns: A matrix with arbitary row indices whose columns are the gene, t
+              statistic, then t p-value; the last two being of float type.
+              Their names are 'gene', 't_stat' and 't_pval'.
 
-    Args:
-        cells: A DataFrame with format matching those returned by
-            get_cell_data. Row values are cell identifiers, columns are first
-            cluster identifier, then tSNE_1 and tSNE_2, then gene names.
-        singleton: A DataFrame with format matching those returned by
-            singleton_test.
-        pair: A DataFrame with format matching those returned by pair_test.
-        cluster: The cluster of interest. Must be in cells['cluster'].values.
-
-    Returns:
-        singleton and pair with columns 'true_positive' and 'true_negative'
-        added.
-
-    Raises:
-        ValueError: cells, singleton, or pair is in an incorrect format, or
-            cluster is not in cells['cluster'].values.
+    :rtype: pandas.DataFrame
     """
 
-    # TODO: column operations for efficiency
-    # TODO: stop code reuse
-    exp = get_discrete_exp(cells, singleton)
-    cluster_list = cells['cluster']
-    cluster_size = cluster_list[cluster_list == cluster].size
-    cluster_exp = exp[cluster_list == cluster]
-    not_cluster_not_exp = 1 - exp[cluster_list != cluster]
-    TP_TN = pd.DataFrame()
-    TP_TN_singleton = pd.DataFrame()
-    i = 0
-    for index, row in pair.iterrows():
-        i += 1
-        if i % 500 == 0:
-            print(str(i) + " of " + str(pair.shape[0]))
-        gene = row['gene']
-        gene_B = row['gene_B']
-        if pd.isnull(gene_B):
-            true_positives = cluster_exp[gene].sum()
-            positives = cluster_size
-            true_negatives = not_cluster_not_exp[gene].sum()
-            negatives = cells.shape[0] - positives
-        elif pd.notnull(gene_B):
-            true_positives = cluster_exp[
-                cluster_exp[gene_B] == 1
-            ][gene].sum()
-            positives = cluster_size
-            true_negatives = not_cluster_not_exp[
-                not_cluster_not_exp[gene] + not_cluster_not_exp[gene_B] > 0
-            ].shape[0]
-            negatives = cells.shape[0] - positives
-        TP_rate = true_positives / float(positives)
-        TN_rate = true_negatives / float(negatives)
-        if pd.isnull(gene_B):
-            row_df_singleton = pd.DataFrame(
-                {
-                    'gene': gene, 'true_positive': TP_rate,
-                    'true_negative': TN_rate
-                }, index=[0]
-            )
-            TP_TN_singleton = TP_TN_singleton.append(
-                row_df_singleton, sort=False, ignore_index=True
-            )
-
-        row_df = pd.DataFrame(
-            {
-                'gene': gene, 'gene_B': gene_B, 'true_positive': TP_rate,
-                'true_negative': TN_rate
-            }, index=[0]
+    t = marker_exp.apply(
+        lambda col:
+        ss.ttest_ind(
+            col[c_list == coi],
+            col[c_list != coi]
         )
-        TP_TN = TP_TN.append(row_df, sort=False, ignore_index=True)
-
-    pair = pair.merge(TP_TN, how='left')
-    # index is pair index; fix this for singleton
-    singleton = singleton.merge(TP_TN_singleton, how='left')
-    return singleton, pair
-
-
-def find_weighted_TP_TN(cells, singleton, pair, cluster):
-    """Finds TP/TN rates weighted by gene quality.
+    )
+    output = pd.DataFrame()
+    output['gene'] = t.index
+    output[['t_stat', 't_pval']] = pd.DataFrame(
+        t.values.tolist(),
+        columns=['t_stat', 't_pval']
+    )
+    return output
 
 
-    Uses output of singleton_test and pair_test to find weighted TP/TN rates
-    for gene expression weighted by gene quality. Gene quality is defined as
-    the number of cells which have nonzero expression. Two methods are
-    used. First, the gene list is split into 3 buckets by quality, and their
-    TP/TN are weighted by fixed coefficients (i.e. 1, 2, 3). Second, the gene
-    list is split into 6 buckets and their TP/TN are weighted by median quality
-    of the bucket.
+def mhg_cutoff_value(marker_exp, cutoff_ind):
+    """Finds discrete expression cutoff value, from given cutoff index.
 
-    Args:
-        cells: A DataFrame with format matching those returned by
-            get_cell_data. Row values are cell identifiers, columns are first
-            cluster identifier, then tSNE_1 and tSNE_2, then gene names, then
-            true positive and true negative, unweighted.
-        singleton: A DataFrame with format matching those returned by
-            singleton_test.
-        pair: A DataFrame with format matching those returned by pair_test.
-        cluster: The cluster of interest. Must be in cells['cluster'].values.
+    The XL-mHG test outputs the index of the cutoff of highest significance
+    between a sample and population.  This functions finds the expression value
+    which corresponds to this index.  Cells above this value we define as
+    expressing, and cells below this value we define as non-expressing.  We
+    therefore choose this value to be between the expression at the index, and
+    the expression of the "next-highest" cell.  I.e. for expression [3.0 3.0
+    1.5 1.0 1.0] and index 4, we should choose a cutoff between 1 and 1.5. This
+    implementation will add epsilon to the lower bound (i.e. the value of
+    FLOAT_PRECISION).  In our example, the output will be 1.0 +
+    FLOAT_PRECISION.  For FLOAT_PRECISION = 0.001, this is 1.001.
 
-    Returns:
-        singleton and pair with columns 'weighted_TP_1', 'weighted_TN_1',
-        'weight_1', 'weighted_TP_2', 'weighted_TN_2', 'weight_2', 'quality'.
+    :param marker_exp: A DataFrame whose rows are cell identifiers, columns are
+        gene identifiers, and values are float values representing gene
+        expression.
+    :param cutoff_ind: A DataFrame whose 'gene' column are gene identifiers,
+        and whose 'mHG_cutoff' column are cutoff indices
 
-    Raises:
-        ValueError: cells, singleton, or pair is in an incorrect format, or
-            cluster is not in cells['cluster'].values.
+    :returns: A DataFrame whose 'gene' column are gene identifiers, and whose
+              'cutoff_val' column are cutoff values corresponding to input
+              cutoff indices.
+
+    :rtype: pandas.DataFrame
     """
 
-    QUANTILES_METHOD_1 = 3
-    QUANTILES_METHOD_2 = 6
-    quality = (cells.astype(bool).sum(axis=0) /
-               cells.shape[0]).rename('quality')
-    singleton = singleton.join(quality, on='gene', sort=False)
-    singleton['weight_1'] = (
-        (
-            pd.qcut(
-                singleton['quality'], QUANTILES_METHOD_1,
-                labels=False, duplicates='drop'
-            ) + 1
-        ) / QUANTILES_METHOD_1
-    )
-    singleton['quantile'] = (
-        pd.qcut(
-            singleton['quality'], QUANTILES_METHOD_2,
-            labels=False, duplicates='drop'
-        ) + 1
-    )
-    singleton['weight_2'] = (
-        singleton[
-            ['quality', 'quantile']
-        ].groupby('quantile').transform('median')
-    )
-    singleton['weighted_TP_1'] = (
-        singleton['true_positive'] * singleton['weight_1']
-    )
-    singleton['weighted_TN_1'] = (
-        singleton['true_negative'] * singleton['weight_1']
-    )
-    singleton['weighted_TP_2'] = (
-        singleton['true_positive'] * singleton['weight_2']
-    )
-    singleton['weighted_TN_2'] = (
-        singleton['true_negative'] * singleton['weight_2']
-    )
-
-    # get pair weights by averaging weights of individuals
-    pair_only = pair[pair['gene_B'].notnull()]
-    pair_weight = pair_only[['gene', 'gene_B']]
-    pair_weight = pair_weight.merge(
-        singleton[['gene', 'weight_1', 'weight_2']],
-        left_on='gene',
-        right_on='gene',
-        how='left'
-    )
-    pair_weight = pair_weight.rename(
-        index=str,
-        columns={
-            'weight_1': 'gene_weight_1',
-            'weight_2': 'gene_weight_2'
-        }
-    )
-    pair_weight = pair_weight.merge(
-        singleton[['gene', 'weight_1', 'weight_2']],
-        left_on='gene_B',
-        right_on='gene',
-        how='left'
-    )
-    pair_weight = pair_weight.rename(
-        index=str,
-        columns={
-            'gene_x': 'gene',
-            'weight_1': 'gene_B_weight_1',
-            'weight_2': 'gene_B_weight_2'
-        }
-    ).drop(columns='gene_y')
-    pair_weight['weight_1'] = (
-        (pair_weight['gene_weight_1'] + pair_weight['gene_B_weight_1'])
-        / 2
-    )
-    pair_weight['weight_2'] = (
-        (pair_weight['gene_weight_2'] + pair_weight['gene_B_weight_2'])
-        / 2
-    )
-    pair_weight = pair_weight.append(
-        singleton[['gene', 'weight_1', 'weight_2']], ignore_index=True,
-        sort=False
-    )
-    pair = pair.merge(
-        pair_weight[['gene', 'gene_B', 'weight_1', 'weight_2']],
-        on=['gene', 'gene_B'],
-        how='left',
-        sort=False
-    )
-    pair['weighted_TP_1'] = (
-        pair['true_positive'] * pair['weight_1']
-    )
-    pair['weighted_TN_1'] = (
-        pair['true_negative'] * pair['weight_1']
-    )
-    pair['weighted_TP_2'] = (
-        pair['true_positive'] * pair['weight_2']
-    )
-    pair['weighted_TN_2'] = (
-        pair['true_negative'] * pair['weight_2']
-    )
-    return singleton, pair
-
-
-
-#####################################################
-########### HIGH RES PLOT CONSTRUCTION ###############
-#####################################################
-
-
-def make_discrete_plots(cells, singleton, pair, plot_pages, path):
-    """Creates plots of discrete expression and saves them to pdf.
-
-
-    Uses output of singleton_test and pair_test to create plots of discrete
-    gene expression. For gene pairs, plot each individual gene as well,
-    comparing their plots to the pair plot. Plots most significant genes/pairs
-    first.
-
-    Args:
-        cells: A DataFrame with format matching those returned by
-            get_cell_data. Row values are cell identifiers, columns are first
-            cluster identifier, then tSNE_1 and tSNE_2, then gene names.
-        singleton: A DataFrame with format matching those returned by
-            singleton_test.
-        pair: A DataFrame with format matching those returned by pair_test.
-        plot_pages: The maximum number of pages to plot. Each gene or gene pair
-            corresponds to one page.
-        path: Save the plot pdf here.
-
-    Returns:
-        Nothing.
-
-    Raises:
-        ValueError: cells, singleton, or pair is in an incorrect format,
-            plot_pages is less than 1.
-    """
-
-    exp = get_discrete_exp(cells, singleton)
-    with PdfPages(path) as pdf:
-        for i in range(0, plot_pages):
-            print("Plotting discrete plot "+str(i+1)+" of "+str(plot_pages))
-            gene_A = pair['gene'].iloc[i]
-            gene_B = pair['gene_B'].iloc[i]
-
-            fig, (ax1, ax2, ax3) = plt.subplots(ncols=3, figsize=(15, 5))
-
-            if pd.isnull(gene_B):
-                c = (exp[gene_A] == 1)
-                ax1.set_title("rank " + str(i+1) + ": " + gene_A)
-            else:
-                c = (exp[gene_A] == 1) & (exp[gene_B] == 1)
-                ax1.set_title(
-                    "rank " + str(i+1) + ": " + gene_A + "+" + gene_B
-                )
-
-            sc1 = ax1.scatter(
-                x=cells['tSNE_1'],
-                y=cells['tSNE_2'],
-                s=2,
-                c=c,
-                cmap=cm.get_cmap('bwr')
-            )
-            ax1.set_xlabel("tSNE_1")
-            ax1.set_ylabel("tSNE_2")
-            # plt.colorbar(sc1, ax=ax1)
-
-            if not pd.isnull(gene_B):
-                sc2 = ax2.scatter(
-                    x=cells['tSNE_1'],
-                    y=cells['tSNE_2'],
-                    s=3,
-                    c=exp[gene_A],
-                    cmap=cm.get_cmap('bwr')
-                )
-                ax2.set_xlabel("tSNE_1")
-                ax2.set_ylabel("tSNE_2")
-                ax2.set_title(
-                    gene_A + " %.3f" %
-                    np.absolute(pair[
-                        (pair['gene'] == gene_A) & (pair['gene_B'].isnull())
-                    ]['mHG_cutoff_value'].iloc[0])
-                )
-                # plt.colorbar(sc2, ax=ax2)
-
-                sc3 = ax3.scatter(
-                    x=cells['tSNE_1'],
-                    y=cells['tSNE_2'],
-                    s=3,
-                    c=exp[gene_B],
-                    cmap=cm.get_cmap('bwr')
-                )
-                ax3.set_xlabel("tSNE_1")
-                ax3.set_ylabel("tSNE_2")
-                ax3.set_title(
-                    gene_B + " %.3f" %
-                    np.absolute(pair[
-                        (pair['gene'] == gene_B) & (pair['gene_B'].isnull())
-                    ]['mHG_cutoff_value'].iloc[0])
-                )
-                # plt.colorbar(sc3, ax=ax3)
-
-            pdf.savefig(fig)
-            plt.close(fig)
-
-
-def make_combined_plots(
-    cells, singleton, pair, plot_pages, pair_path, singleton_path
-):
-    """Creates a plot of discrete and continuous expression and saves to pdf.
-
-
-    Uses output of singleton_test and pair_test to create plots of discrete and
-    continuous expression. For gene pairs, make these two plots for each gene
-    in the pair. Plots most significant genes/pairs first. Also makes a similar
-    plot using only singletons.
-
-    Args:
-        cells: A DataFrame with format matching those returned by
-            get_cell_data. Row values are cell identifiers, columns are first
-            cluster identifier, then tSNE_1 and tSNE_2, then gene names.
-        singleton: A DataFrame with format matching those returned by
-            singleton_test.
-        pair: A DataFrame with format matching those returned by pair_test.
-        plot_pages: The maximum number of pages to plot. Each gene or gene pair
-            corresponds to one page.
-        pair_path: Save the full plot pdf here.
-        singleton_path: Save the singleton-only plot pdf here.
-
-    Returns:
-        Nothing.
-
-    Raises:
-        ValueError: cells, singleton, or pair is in an incorrect format,
-            plot_pages is less than 1.
-    """
-
-    CMAP_CONTINUOUS = cm.get_cmap('nipy_spectral')
-    CMAP_DISCRETE = cm.get_cmap('bwr')
-    exp = get_discrete_exp(cells, singleton)
-    with PdfPages(pair_path) as pdf:
-        for i in range(0, plot_pages):
-            print("Plotting combination plot "+str(i+1)+" of "+str(plot_pages))
-            # plot the cutoff
-            gene_A = pair['gene'].iloc[i]
-            gene_B = pair['gene_B'].iloc[i]
-
-            # Plot regular gene instead of complement.
-            # This is unnecessary and counterproductive.
-            """
-            pattern = re.compile(r"^(.*)_c+$")
-            search_A = re.search(pattern, gene_A)
-            if search_A:
-                gene_A = search_A.group(1)
-                if pd.notnull(gene_B):
-                    search_B = re.search(pattern, gene_B)
-                    if search_B:
-                        gene_B = search_B.group(1)
-            """
-
-            # Graphs twogene and singlegene differently.
-            if not pd.isnull(gene_B):
-                fig, ((ax1a, ax1b), (ax2a, ax2b)) = plt.subplots(
-                    nrows=2, ncols=2, figsize=(10, 10)
-                )
-
-                sc1a = ax1a.scatter(
-                    x=cells['tSNE_1'],
-                    y=cells['tSNE_2'],
-                    s=3,
-                    c=exp[gene_A],
-                    cmap=CMAP_DISCRETE
-                )
-                ax1a.set_xlabel("tSNE_1")
-                ax1a.set_ylabel("tSNE_2")
-                ax1a.set_title(
-                    gene_A + " %.3f" %
-                    np.absolute(pair[
-                        (pair['gene'] == gene_A) & (pair['gene_B'].isnull())
-                    ]['mHG_cutoff_value'].iloc[0])
-                )
-                # plt.colorbar(sc1a, ax=ax1a)
-
-                sc1b = ax1b.scatter(
-                    x=cells['tSNE_1'],
-                    y=cells['tSNE_2'],
-                    s=3,
-                    c=np.absolute(cells[gene_A]),
-                    cmap=CMAP_CONTINUOUS
-                )
-                ax1b.set_xlabel("tSNE_1")
-                ax1b.set_ylabel("tSNE_2")
-                ax1b.set_title(gene_A)
-                plt.colorbar(sc1b, ax=ax1b)
-
-                sc2a = ax2a.scatter(
-                    x=cells['tSNE_1'],
-                    y=cells['tSNE_2'],
-                    s=3,
-                    c=exp[gene_B],
-                    cmap=CMAP_DISCRETE
-                )
-                ax2a.set_xlabel("tSNE_1")
-                ax2a.set_ylabel("tSNE_2")
-                ax2a.set_title(
-                    gene_B + " %.3f" %
-                    np.absolute(pair[
-                        (pair['gene'] == gene_B) & (pair['gene_B'].isnull())
-                    ]['mHG_cutoff_value'].iloc[0])
-                )
-                # plt.colorbar(sc2a, ax=ax2a)
-
-                sc2b = ax2b.scatter(
-                    x=cells['tSNE_1'],
-                    y=cells['tSNE_2'],
-                    s=3,
-                    c=np.absolute(cells[gene_B]),
-                    cmap=CMAP_CONTINUOUS
-                )
-                ax2b.set_xlabel("tSNE_1")
-                ax2b.set_ylabel("tSNE_2")
-                ax2b.set_title(gene_B)
-                plt.colorbar(sc2b, ax=ax2b)
-            else:
-                fig, (ax1, ax2) = plt.subplots(ncols=2, figsize=(10, 5))
-
-                sc1 = ax1.scatter(
-                    x=cells['tSNE_1'],
-                    y=cells['tSNE_2'],
-                    s=3,
-                    c=exp[gene_A],
-                    cmap=CMAP_DISCRETE
-                )
-                ax1.set_xlabel("tSNE_1")
-                ax1.set_ylabel("tSNE_2")
-                ax1.set_title(
-                    gene_A + " %.3f" %
-                    np.absolute(pair[
-                        (pair['gene'] == gene_A) & (pair['gene_B'].isnull())
-                    ]['mHG_cutoff_value'].iloc[0])
-                )
-                # plt.colorbar(sc1, ax=ax1)
-
-                sc2 = ax2.scatter(
-                    x=cells['tSNE_1'],
-                    y=cells['tSNE_2'],
-                    s=3,
-                    c=np.absolute(cells[gene_A]),
-                    cmap=CMAP_CONTINUOUS
-                )
-                ax2.set_xlabel("tSNE_1")
-                ax2.set_ylabel("tSNE_2")
-                ax2.set_title(gene_A)
-                plt.colorbar(sc2, ax=ax2)
-
-            plt.tight_layout()
-            pdf.savefig(fig)
-            plt.close(fig)
-
-    with PdfPages(singleton_path) as pdf:
-        for i in range(0, plot_pages):
-            print(
-                "Plotting single combination plot " + str(i+1)
-                + " of " + str(plot_pages)
-            )
-
-            # plot the cutoff
-            gene = singleton['gene'].iloc[i]
-
-            # Plot regular gene instead of complement.
-            # This is unnecessary and counterproductive.
-            """
-            pattern = re.compile(r"^(.*)_c+$")
-            search = re.search(pattern, gene)
-            if search:
-                gene = search.group(1)
-            """
-
-            fig, (ax1, ax2) = plt.subplots(ncols=2, figsize=(10, 5))
-
-            sc1 = ax1.scatter(
-                x=cells['tSNE_1'],
-                y=cells['tSNE_2'],
-                s=3,
-                c=exp[gene],
-                cmap=CMAP_DISCRETE
-            )
-            ax1.set_xlabel("tSNE_1")
-            ax1.set_ylabel("tSNE_2")
-            ax1.set_title(
-                gene + " %.3f" %
-                np.absolute(singleton[
-                    singleton['gene'] == gene
-                ]['mHG_cutoff_value'].iloc[0])
-            )
-            # plt.colorbar(sc1, ax=ax1)
-
-            sc2 = ax2.scatter(
-                x=cells['tSNE_1'],
-                y=cells['tSNE_2'],
-                s=3,
-                c=np.absolute(cells[gene]),
-                cmap=CMAP_CONTINUOUS
-            )
-            ax2.set_xlabel("tSNE_1")
-            ax2.set_ylabel("tSNE_2")
-            ax2.set_title(gene)
-            plt.colorbar(sc2, ax=ax2)
-
-            plt.tight_layout()
-            pdf.savefig(fig)
-            plt.close(fig)
-
-
-def make_TP_TN_plots(
-    cells, singleton, pair, plot_genes, pair_path, singleton_path
-):
-    """Creates plots of true positive/true negative rates and saves to pdf.
-
-
-    Uses output of find_TP_TN to create plots of true positive and true
-    negative rate by gene or gene pair. Plots most significant genes/pairs
-    first. Also makes a similar plot using only singletons.
-
-    Args:
-        cells: A DataFrame with format matching those returned by
-        get_cell_data. Row values are cell identifiers, columns are first
-        cluster identifier, then tSNE_1 and tSNE_2, then gene names.
-        singleton: A DataFrame with format matching those returned by
-        singleton_test.
-        pair: A DataFrame with format matching those returned by pair_test.
-        plot_genes: Number of genes/pairs to plot. More is messier!
-        pair_path: Save the full plot pdf here.
-        singleton_path: Save the singleton-only plot pdf here.
-
-    Returns:
-        Nothing.
-
-    Raises:
-        ValueError: cells, singleton, or pair is in an incorrect format,
-        plot_pages is less than 1.
-    """
-    PADDING = 0.002
-
-    fig = plt.figure(figsize=[15, 15])
-    plt.xlabel("True positive")
-    plt.ylabel("True negative")
-    plt.title("True positive/negative")
-    plt.axis([0.0, 1.0, 0.0, 1.0])
-    plt.scatter(pair.iloc[:20]['true_positive'],
-                pair.iloc[:20]['true_negative'],
-                s=3)
-
-    for i in range(0, 20):
-        row = pair.iloc[i]
-        if pd.isnull(row['gene_B']):
-            plt.annotate(
-                row['gene'], (row['true_positive'] + PADDING,
-                              row['true_negative'] + PADDING),
-            )
+    def find_val(row):
+        gene = row['gene']
+        val = marker_exp[gene].sort_values(
+            ascending=False).iloc[row['mHG_cutoff']]
+        if re.compile(".*_c$").match(gene):
+            return val - FLOAT_PRECISION
         else:
-            plt.annotate(
-                row['gene'] + "+" + row['gene_B'],
-                (row['true_positive'] + PADDING,
-                 row['true_negative'] + PADDING)
-            )
+            return val + FLOAT_PRECISION
 
-    fig.savefig(pair_path)
-    plt.close(fig)
-
-    fig = plt.figure(figsize=[15, 15])
-    plt.xlabel("True positive")
-    plt.ylabel("True negative")
-    plt.title("True positive/negative")
-    plt.axis([0.0, 1.0, 0.0, 1.0])
-    plt.scatter(singleton.iloc[:20]['true_positive'],
-                singleton.iloc[:20]['true_negative'],
-                s=3)
-
-    for i in range(0, 20):
-        row = singleton.iloc[i]
-        plt.annotate(row['gene'], (row['true_positive'] +
-                                   PADDING, row['true_negative'] + PADDING))
-
-    fig.savefig(singleton_path)
-    plt.close(fig)
+    cutoff_ind.index = cutoff_ind['gene']
+    cutoff_val = cutoff_ind.apply(
+        find_val, axis='columns'
+    ).rename('cutoff_val')
+    output = cutoff_val.to_frame().reset_index()
+    return output
 
 
+def mhg_slide(marker_exp, cutoff_val):
+    """Slides cutoff indices in XL-mHG output out of uniform expression groups.
 
-#####################################################
-########### LOW RES PLOT CONSTRUCTION ###############
-#####################################################
+    The XL-mHG test may place a cutoff index that "cuts" across a group of
+    uniform expression inside the sorted expression list.  I.e. for a
+    population of cells of which many have zero expression, the XL-mHG test may
+    demand that we sample some of the zero-expression cells and not others.
+    This is impossible because the cells are effectively identical.  This
+    function therefore moves the XL-mHG cutoff index so that it falls on a
+    measurable gene expression boundary.
+
+    Example: for a sorted gene expression list [5, 4, 1, 0, 0, 0] and XL-mHG
+    cutoff index 4, this function will "slide" the index to 3; marking the
+    boundary between zero expression and expression value 1.
+
+    :param marker_exp: A DataFrame whose rows are cell identifiers, columns are
+        gene identifiers, and values are float values representing gene
+        expression.
+    :param cutoff_val: A DataFrame whose 'gene' column are gene identifiers,
+        and whose 'cutoff_val' column are cutoff values corresponding to input
+        cutoff indices.
+
+    :returns: A DataFrame with 'gene', 'mHG_cutoff', and 'cutoff_val' columns,
+              slid.
+
+    :rtype: pandas.DataFrame
+    """
+    cutoff_val.index = cutoff_val['gene']
+    cutoff_ind = cutoff_val.apply(
+        lambda row:
+        np.searchsorted(
+            -marker_exp[row['gene']].sort_values(ascending=False).values,
+            -row['cutoff_val'], side='left'
+        ),
+        axis='columns'
+    )
+    output = cutoff_val
+    output['mHG_cutoff'] = cutoff_ind
+    # Reorder and remove redundant row index
+    output = output.reset_index(
+        drop=True)[['gene', 'mHG_cutoff', 'cutoff_val']]
+    return output
 
 
-def make_discrete_plots_low(cells, singleton, pair, plot_pages, path):
-    """Creates plots of discrete expression and saves them to pdf.
+def discrete_exp(marker_exp, cutoff_val):
+    """Converts a continuous gene expression matrix to discrete.
+
+    As a note: cutoff values correspond to the "top" of non-expression.  Only
+    cells expressing at values greater than the cutoff are marked as
+    "expressing"; cells expressing at the cutoff exactly are not.
+
+    :param marker_exp: A DataFrame whose rows are cell identifiers, columns are
+        gene identifiers, and values are float values representing gene
+        expression.
+    :param cutoff_val: A Series whose rows are gene identifiers, and values are
+        cutoff values.
+
+    :returns: A gene expression matrix identical to marker_exp, but with
+              boolean rather than float expression values.
+
+    :rtype: pandas.DataFrame
+    """
+    output = pd.DataFrame()
+    for gene in marker_exp.columns:
+        output[gene] = (marker_exp[gene] > cutoff_val[gene]) * 1
+    return output
 
 
-    Uses output of singleton_test and pair_test to create plots of discrete
-    gene expression. For gene pairs, plot each individual gene as well,
-    comparing their plots to the pair plot. Plots most significant genes/pairs
-    first.
+def tp_tn(discrete_exp, c_list, coi, cluster_number):
+    """Finds simple true positive/true negative values for the cluster of
+    interest.
 
-    Args:
-        cells: A DataFrame with format matching those returned by
-            get_cell_data. Row values are cell identifiers, columns are first
-            cluster identifier, then tSNE_1 and tSNE_2, then gene names.
-        singleton: A DataFrame with format matching those returned by
-            singleton_test.
-        pair: A DataFrame with format matching those returned by pair_test.
-        plot_pages: The maximum number of pages to plot. Each gene or gene pair
-            corresponds to one page.
-        path: Save the plot pdf here.
+    :param discrete_exp: A DataFrame whose rows are cell identifiers, columns
+        are gene identifiers, and values are boolean values representing gene
+        expression.
+    :param c_list: A Series whose indices are cell identifiers, and whose
+        values are the cluster which that cell is part of.
+    :param coi: The cluster of interest.
 
-    Returns:
-        Nothing.
+    :returns: A matrix with arbitary row indices, and has 3 columns: one for
+              gene name, then 2 containing the true positive and true negative
+              values respectively.  Their names are 'gene', 'TP', and 'TN'.
 
-    Raises:
-        ValueError: cells, singleton, or pair is in an incorrect format,
-            plot_pages is less than 1.
+    :rtype: pandas.DataFrame
     """
 
-    exp = get_discrete_exp(cells, singleton)
-    with PdfPages(path) as pdf:
-        for i in range(0, plot_pages):
-            print("Plotting discrete plot "+str(i+1)+" of "+str(plot_pages))
-            gene_A = pair['gene'].iloc[i]
-            gene_B = pair['gene_B'].iloc[i]
-
-            fig, (ax1, ax2, ax3) = plt.subplots(ncols=3, figsize=(15, 5))
-
-            if pd.isnull(gene_B):
-                c = (exp[gene_A] == 1)
-                ax1.set_title("rank " + str(i+1) + ": " + gene_A)
-            else:
-                c = (exp[gene_A] == 1) & (exp[gene_B] == 1)
-                ax1.set_title(
-                    "rank " + str(i+1) + ": " + gene_A + "+" + gene_B
-                )
-
-            sc1 = ax1.scatter(
-                x=cells['tSNE_1'],
-                y=cells['tSNE_2'],
-                s=2,
-                c=c,
-                cmap=cm.get_cmap('bwr')
+    #does rest of clusters
+    sing_cluster_exp_matrices = {}
+    for clstrs in range(cluster_number):
+        if clstrs+1 == coi:
+            continue
+        mem_list = (c_list == (clstrs+1)) * 1
+        tp_tn =discrete_exp.apply(
+            lambda col: (
+                np.dot(mem_list, col.values) / np.sum(mem_list),
+                np.dot(1 - mem_list, 1 - col.values) / np.sum(1 - mem_list),
             )
-            ax1.set_xlabel("tSNE_1")
-            ax1.set_ylabel("tSNE_2")
-            # plt.colorbar(sc1, ax=ax1)
+        )
+        sing_cluster_exp_matrices[clstrs+1] = pd.DataFrame()
+        sing_cluster_exp_matrices[clstrs+1]['gene'] = tp_tn.index
+        sing_cluster_exp_matrices[clstrs+1][['TP', 'TN']] = pd.DataFrame(
+            tp_tn.values.tolist(),
+            columns=['TP', 'TN']
+        )
+        sing_cluster_exp_matrices[clstrs+1].set_index('gene',inplace=True)
+        
 
-            if not pd.isnull(gene_B):
-                sc2 = ax2.scatter(
-                    x=cells['tSNE_1'],
-                    y=cells['tSNE_2'],
-                    s=3,
-                    c=exp[gene_A],
-                    cmap=cm.get_cmap('bwr')
-                )
-                ax2.set_xlabel("tSNE_1")
-                ax2.set_ylabel("tSNE_2")
-                ax2.set_title(
-                    gene_A + " %.3f" %
-                    np.absolute(pair[
-                        (pair['gene'] == gene_A) & (pair['gene_B'].isnull())
-                    ]['mHG_cutoff_value'].iloc[0])
-                )
-                # plt.colorbar(sc2, ax=ax2)
-
-                sc3 = ax3.scatter(
-                    x=cells['tSNE_1'],
-                    y=cells['tSNE_2'],
-                    s=3,
-                    c=exp[gene_B],
-                    cmap=cm.get_cmap('bwr')
-                )
-                ax3.set_xlabel("tSNE_1")
-                ax3.set_ylabel("tSNE_2")
-                ax3.set_title(
-                    gene_B + " %.3f" %
-                    np.absolute(pair[
-                        (pair['gene'] == gene_B) & (pair['gene_B'].isnull())
-                    ]['mHG_cutoff_value'].iloc[0])
-                )
-                # plt.colorbar(sc3, ax=ax3)
-
-            pdf.savefig(fig)
-            plt.close(fig)
+    #does our cluster of interest
+    # * 1 converts to integer
+    mem_list = (c_list == coi) * 1
+    tp_tn = discrete_exp.apply(
+        lambda col: (
+            np.dot(mem_list, col.values) / np.sum(mem_list),
+            np.dot(1 - mem_list, 1 - col.values) / np.sum(1 - mem_list),
+        )
+    )
+    output = pd.DataFrame()
+    output['gene'] = tp_tn.index
+    output[['TP', 'TN']] = pd.DataFrame(
+        tp_tn.values.tolist(),
+        columns=['TP', 'TN']
+    )
+    
+    #outputs a DF for COI and a dict of DF's for rest
+    return output, sing_cluster_exp_matrices
 
 
-def make_combined_plots_low(
-    cells, singleton, pair, plot_pages, pair_path, singleton_path
-):
-    """Creates a plot of discrete and continuous expression and saves to pdf.
+def pair_product(discrete_exp, c_list, coi, cluster_number):
+    """Finds paired expression counts.  Returns in matrix form.
 
+    The product of the transpose of the discrete_exp DataFrame is a matrix
+    whose rows and columns correspond to individual genes.  Each value is the
+    number of cells which express both genes (i.e. the dot product of two lists
+    of 1s and 0s encoding expression/nonexpression for their respective genes
+    in the population).  The product therefore encodes joint expression counts
+    for any possible gene pair (including a single gene paired with itself).
 
-    Uses output of singleton_test and pair_test to create plots of discrete and
-    continuous expression. For gene pairs, make these two plots for each gene
-    in the pair. Plots most significant genes/pairs first. Also makes a similar
-    plot using only singletons.
+    This function produces two matrices: one considering only cells inside the
+    cluster of interest, and one considering all cells in the population.
 
-    Args:
-        cells: A DataFrame with format matching those returned by
-            get_cell_data. Row values are cell identifiers, columns are first
-            cluster identifier, then tSNE_1 and tSNE_2, then gene names.
-        singleton: A DataFrame with format matching those returned by
-            singleton_test.
-        pair: A DataFrame with format matching those returned by pair_test.
-        plot_pages: The maximum number of pages to plot. Each gene or gene pair
-            corresponds to one page.
-        pair_path: Save the full plot pdf here.
-        singleton_path: Save the singleton-only plot pdf here.
+    This function also produces a list mapping integer indices to gene names,
+    and the population cell count.
 
-    Returns:
-        Nothing.
+    Additionally, only the upper triangular part of the output matrices is
+    unique.  This function therefore also returns the upper triangular indices
+    for use by other functions; this is a lazy workaround for the issue that
+    comes with using columns 'gene_1' and 'gene_2' to store gene pairs; the
+    gene pair (A, B) is therefore treated differently than (B, A).  Specifying
+    the upper triangular part prevents (B, A) from existing.
 
-    Raises:
-        ValueError: cells, singleton, or pair is in an incorrect format,
-            plot_pages is less than 1.
+    TODO: fix this redundancy using multi-indices
+
+    :param discrete_exp: A DataFrame whose rows are cell identifiers, columns
+        are gene identifiers, and values are boolean values representing gene
+        expression.
+    :param c_list: A Series whose indices are cell identifiers, and whose
+        values are the cluster which that cell is part of.
+    :param coi: The cluster of interest.
+    :param clusters_number: dict with clusters and their sizes
+
+    :returns: (gene mapping list, cluster count, total count, cluster paired
+              expression count matrix, population paired expression count
+              matrix, upper triangular matrix index)
+
+    :rtype: (pandas.Index, int, int, numpy.ndarray, numpy.ndarray,
+            numpy.ndarray)
     """
 
-    CMAP_CONTINUOUS = cm.get_cmap('nipy_spectral')
-    CMAP_DISCRETE = cm.get_cmap('bwr')
-    exp = get_discrete_exp(cells, singleton)
-    with PdfPages(pair_path) as pdf:
-        for i in range(0, plot_pages):
-            print("Plotting combination plot "+str(i+1)+" of "+str(plot_pages))
-            # plot the cutoff
-            gene_A = pair['gene'].iloc[i]
-            gene_B = pair['gene_B'].iloc[i]
-
-            # Plot regular gene instead of complement.
-            # This is unnecessary and counterproductive.
-            """
-            pattern = re.compile(r"^(.*)_c+$")
-            search_A = re.search(pattern, gene_A)
-            if search_A:
-                gene_A = search_A.group(1)
-                if pd.notnull(gene_B):
-                    search_B = re.search(pattern, gene_B)
-                    if search_B:
-                        gene_B = search_B.group(1)
-            """
-
-            # Graphs twogene and singlegene differently.
-            if not pd.isnull(gene_B):
-                fig, ((ax1a, ax1b), (ax2a, ax2b)) = plt.subplots(
-                    nrows=2, ncols=2, figsize=(10, 10)
-                )
-
-                sc1a = ax1a.scatter(
-                    x=cells['tSNE_1'],
-                    y=cells['tSNE_2'],
-                    s=3,
-                    c=exp[gene_A],
-                    cmap=CMAP_DISCRETE
-                )
-                ax1a.set_xlabel("tSNE_1")
-                ax1a.set_ylabel("tSNE_2")
-                ax1a.set_title(
-                    gene_A + " %.3f" %
-                    np.absolute(pair[
-                        (pair['gene'] == gene_A) & (pair['gene_B'].isnull())
-                    ]['mHG_cutoff_value'].iloc[0])
-                )
-                # plt.colorbar(sc1a, ax=ax1a)
-
-                sc1b = ax1b.scatter(
-                    x=cells['tSNE_1'],
-                    y=cells['tSNE_2'],
-                    s=3,
-                    c=np.absolute(cells[gene_A]),
-                    cmap=CMAP_CONTINUOUS
-                )
-                ax1b.set_xlabel("tSNE_1")
-                ax1b.set_ylabel("tSNE_2")
-                ax1b.set_title(gene_A)
-                plt.colorbar(sc1b, ax=ax1b)
-
-                sc2a = ax2a.scatter(
-                    x=cells['tSNE_1'],
-                    y=cells['tSNE_2'],
-                    s=3,
-                    c=exp[gene_B],
-                    cmap=CMAP_DISCRETE
-                )
-                ax2a.set_xlabel("tSNE_1")
-                ax2a.set_ylabel("tSNE_2")
-                ax2a.set_title(
-                    gene_B + " %.3f" %
-                    np.absolute(pair[
-                        (pair['gene'] == gene_B) & (pair['gene_B'].isnull())
-                    ]['mHG_cutoff_value'].iloc[0])
-                )
-                # plt.colorbar(sc2a, ax=ax2a)
-
-                sc2b = ax2b.scatter(
-                    x=cells['tSNE_1'],
-                    y=cells['tSNE_2'],
-                    s=3,
-                    c=np.absolute(cells[gene_B]),
-                    cmap=CMAP_CONTINUOUS
-                )
-                ax2b.set_xlabel("tSNE_1")
-                ax2b.set_ylabel("tSNE_2")
-                ax2b.set_title(gene_B)
-                plt.colorbar(sc2b, ax=ax2b)
-            else:
-                fig, (ax1, ax2) = plt.subplots(ncols=2, figsize=(10, 5))
-
-                sc1 = ax1.scatter(
-                    x=cells['tSNE_1'],
-                    y=cells['tSNE_2'],
-                    s=3,
-                    c=exp[gene_A],
-                    cmap=CMAP_DISCRETE
-                )
-                ax1.set_xlabel("tSNE_1")
-                ax1.set_ylabel("tSNE_2")
-                ax1.set_title(
-                    gene_A + " %.3f" %
-                    np.absolute(pair[
-                        (pair['gene'] == gene_A) & (pair['gene_B'].isnull())
-                    ]['mHG_cutoff_value'].iloc[0])
-                )
-                # plt.colorbar(sc1, ax=ax1)
-
-                sc2 = ax2.scatter(
-                    x=cells['tSNE_1'],
-                    y=cells['tSNE_2'],
-                    s=3,
-                    c=np.absolute(cells[gene_A]),
-                    cmap=CMAP_CONTINUOUS
-                )
-                ax2.set_xlabel("tSNE_1")
-                ax2.set_ylabel("tSNE_2")
-                ax2.set_title(gene_A)
-                plt.colorbar(sc2, ax=ax2)
-
-            plt.tight_layout()
-            pdf.savefig(fig)
-            plt.close(fig)
-
-    with PdfPages(singleton_path) as pdf:
-        for i in range(0, plot_pages):
-            print(
-                "Plotting single combination plot " + str(i+1)
-                + " of " + str(plot_pages)
-            )
-
-            # plot the cutoff
-            gene = singleton['gene'].iloc[i]
-
-            # Plot regular gene instead of complement.
-            # This is unnecessary and counterproductive.
-            """
-            pattern = re.compile(r"^(.*)_c+$")
-            search = re.search(pattern, gene)
-            if search:
-                gene = search.group(1)
-            """
-
-            fig, (ax1, ax2) = plt.subplots(ncols=2, figsize=(10, 5))
-
-            sc1 = ax1.scatter(
-                x=cells['tSNE_1'],
-                y=cells['tSNE_2'],
-                s=3,
-                c=exp[gene],
-                cmap=CMAP_DISCRETE
-            )
-            ax1.set_xlabel("tSNE_1")
-            ax1.set_ylabel("tSNE_2")
-            ax1.set_title(
-                gene + " %.3f" %
-                np.absolute(singleton[
-                    singleton['gene'] == gene
-                ]['mHG_cutoff_value'].iloc[0])
-            )
-            # plt.colorbar(sc1, ax=ax1)
-
-            sc2 = ax2.scatter(
-                x=cells['tSNE_1'],
-                y=cells['tSNE_2'],
-                s=3,
-                c=np.absolute(cells[gene]),
-                cmap=CMAP_CONTINUOUS
-            )
-            ax2.set_xlabel("tSNE_1")
-            ax2.set_ylabel("tSNE_2")
-            ax2.set_title(gene)
-            plt.colorbar(sc2, ax=ax2)
-
-            plt.tight_layout()
-            pdf.savefig(fig)
-            plt.close(fig)
-
-
-def make_TP_TN_plots_low(
-    cells, singleton, pair, plot_genes, pair_path, singleton_path
-):
-    """Creates plots of true positive/true negative rates and saves to pdf.
-
-
-    Uses output of find_TP_TN to create plots of true positive and true
-    negative rate by gene or gene pair. Plots most significant genes/pairs
-    first. Also makes a similar plot using only singletons.
-
-    Args:
-        cells: A DataFrame with format matching those returned by
-        get_cell_data. Row values are cell identifiers, columns are first
-        cluster identifier, then tSNE_1 and tSNE_2, then gene names.
-        singleton: A DataFrame with format matching those returned by
-        singleton_test.
-        pair: A DataFrame with format matching those returned by pair_test.
-        plot_genes: Number of genes/pairs to plot. More is messier!
-        pair_path: Save the full plot pdf here.
-        singleton_path: Save the singleton-only plot pdf here.
-
-    Returns:
-        Nothing.
-
-    Raises:
-        ValueError: cells, singleton, or pair is in an incorrect format,
-        plot_pages is less than 1.
-    """
-    PADDING = 0.002
-
-    fig = plt.figure(figsize=[15, 15])
-    plt.xlabel("True positive")
-    plt.ylabel("True negative")
-    plt.title("True positive/negative")
-    plt.axis([0.0, 1.0, 0.0, 1.0])
-    plt.scatter(pair.iloc[:20]['true_positive'],
-                pair.iloc[:20]['true_negative'],
-                s=3)
-
-    for i in range(0, 20):
-        row = pair.iloc[i]
-        if pd.isnull(row['gene_B']):
-            plt.annotate(
-                row['gene'], (row['true_positive'] + PADDING,
-                              row['true_negative'] + PADDING),
-            )
+    gene_map = discrete_exp.columns
+    in_cls_matrix = discrete_exp[c_list == coi].values
+    total_matrix = discrete_exp.values
+    #get exp matrices for each non-interest cluster for new rank scheme
+    #(clstrs + 1 because range starts a list @ 0)
+    cluster_exp_matrices = {}
+    cls_counts = {}
+    for clstrs in range(cluster_number):
+        if clstrs+1 == coi:
+            pass
         else:
-            plt.annotate(
-                row['gene'] + "+" + row['gene_B'],
-                (row['true_positive'] + PADDING,
-                 row['true_negative'] + PADDING)
-            )
-
-    fig.savefig(pair_path)
-    plt.close(fig)
-
-    fig = plt.figure(figsize=[15, 15])
-    plt.xlabel("True positive")
-    plt.ylabel("True negative")
-    plt.title("True positive/negative")
-    plt.axis([0.0, 1.0, 0.0, 1.0])
-    plt.scatter(singleton.iloc[:20]['true_positive'],
-                singleton.iloc[:20]['true_negative'],
-                s=3)
-
-    for i in range(0, 20):
-        row = singleton.iloc[i]
-        plt.annotate(row['gene'], (row['true_positive'] +
-                                   PADDING, row['true_negative'] + PADDING))
-
-    fig.savefig(singleton_path)
-    plt.close(fig)
+            cluster_exp_matrices[clstrs+1] = discrete_exp[c_list == clstrs+1].values
+            
+            cluster_exp_matrices[clstrs+1]=np.matmul(np.transpose(cluster_exp_matrices[clstrs+1]),cluster_exp_matrices[clstrs+1] )
+            cls_counts[clstrs+1] = np.size(cluster_exp_matrices[clstrs+1],0)
+        
+        
+    in_cls_count = np.size(in_cls_matrix, 0)
+    pop_count = np.size(total_matrix, 0)
+    in_cls_product = np.matmul(np.transpose(in_cls_matrix), in_cls_matrix)
+    total_product = np.matmul(np.transpose(total_matrix), total_matrix)
+    upper_tri_indices = np.triu_indices(gene_map.size,1)
+    print(type(in_cls_product))
+    return (
+        gene_map,
+        in_cls_count, pop_count,
+        in_cls_product, total_product,
+        upper_tri_indices, cluster_exp_matrices, cls_counts
+    )
 
 
+def combination_product(discrete_exp,c_list,coi):
+    '''
+    Makes the count matrix for combinations of K genes where K > 2 :)
 
+    X -> in_cls_matrix
+
+    First constructs the extended gene by cell matrix then multiplies by the transpose
+    -> (X^T & X^T) * X
+    & represents AND bitwise operation to construct the gene combos by cells matrix
+    (need to perform AND on each row in first X^T by each row in second X^T)
+    This scales to K genes , just need to do more ANDs with more X^Ts
+
+    Once the first step is complete, simply multiply using np.matmul to get the gene by gene
+    matrix. Need to also make a new gene_map
+    '''
+
+
+    def trips_matrix_gen(matrix):
+        trips_in_cls_matrix = []
+        row1count = 1
+        for row1 in np.transpose(matrix):
+            row2count = 1
+            for row2 in np.transpose(matrix):
+                if row1count==row2count:
+                    row2count <= row2count+1
+                    continue
+                trips_in_cls_matrix.append([row1&row2])
+                row2count=row2count+1
+            row1count = row1count + 1
+                #print(row1)
+                #print(row2)
+                #print('AND HERE')
+        #trips_matrix is in cluster combo gene by cell
+        trips_matrix = np.array(trips_in_cls_matrix)
+        #trips_in_cls_product is in cluster count matrix, gene pair by gene
+        #Has special structure to reduce size of matrix
+        #e.g. genes A,B,C,D ->
+        # Only does combo rows for AB,AC,AD,BC,BD,CD
+        trips_in_cls_product = np.matmul(trips_matrix,matrix)
+        print(trips_in_cls_product)
+        print(trips_in_cls_product.size)
+        trips_count = np.size(trips_matrix)
+        time.sleep(1000)
+        return trips_in_cls_product,trips_count
+    
+    in_cls_matrix = discrete_exp[c_list == coi].values
+    total_matrix = discrete_exp.values
+    print(np.transpose(in_cls_matrix))
+    print(np.transpose(total_matrix))
+    axes = len(discrete_exp.columns)
+    #trips
+    #gene_map_cols = discrete_exp.columns
+    #time.sleep(1000)
+    return (
+        trips_in_cls_product,trips_total_product
+        )
+
+
+
+def pair_hg(gene_map, in_cls_count, pop_count, in_cls_product, total_product,
+            upper_tri_indices):
+    """Finds hypergeometric statistic of gene pairs.
+
+    Takes in discrete single-gene expression matrix, and finds the
+    hypergeometric p-value of the sample that includes cells which express both
+    of a pair of genes.
+
+    :param gene_map: An Index mapping index values to gene names.
+    :param in_cls_count: The number of cells in the cluster.
+    :param pop_count: The number of cells in the population.
+    :param in_cls_product: The cluster paired expression count matrix.
+    :param total_product: The population paired expression count matrix.
+    :param upper_tri_indices: An array specifying UT indices; from numpy.utri
+
+    :returns: A matrix with columns: the two genes of the pair, hypergeometric
+              test statistics for that pair.  Their names are 'gene_1',
+              'gene_2', 'HG_stat'.
+
+    :rtype: pandas.DataFrame
+
+    """
+
+    # maps the scipy hypergeom test over a numpy array
+    #vhg = np.vectorize(ss.hypergeom.sf, excluded=[1,3,4], otypes=[np.float])
+
+    #This gives us the matrix with one subtracted everywhere(zero
+    #lowest since cant have neg counts). With SF, this should give
+    #us prob that we get X cells or more
+    #altered_in_cls_product = np.copy(in_cls_product)
+    #for value in np.nditer(altered_in_cls_product,op_flags=['readwrite']):
+    #    if value == 0:
+    #        pass
+    #    else:
+    #        value[...] = value - 1
+    #print('here')
+    #print(in_cls_product)
+    #print(altered_in_cls_product)
+    #print(upper_tri_indices)
+    #altered_in_cls_product = altered_in_cls_product.transpose()
+
+    # Only apply to upper triangular
+    #hg_result = vhg(
+    #    in_cls_product[upper_tri_indices] ,
+    #    pop_count,
+        #in_cls_count,
+    #    total_product[upper_tri_indices],
+    #    in_cls_count,
+    #    loc=1
+    #)
+    #output = pd.DataFrame({
+    #    'gene_1': gene_map[upper_tri_indices[0]],
+    #    'gene_2': gene_map[upper_tri_indices[1]],
+    #    'HG_stat': hg_result
+    #}, columns=['gene_1', 'gene_2', 'HG_stat'])
+
+    #print('here')
+    #print(gene_map)
+    #return output
+
+
+    #OLD CODE
+    vhg = np.vectorize(ss.hypergeom.sf, excluded=[1, 2, 4], otypes=[np.float])
+
+    # Only apply to upper triangular
+    hg_result = vhg(
+        in_cls_product[upper_tri_indices],
+        pop_count,
+        in_cls_count,
+        total_product[upper_tri_indices],
+        loc=1
+    )
+    output = pd.DataFrame({
+        'gene_1': gene_map[upper_tri_indices[0]],
+        'gene_2': gene_map[upper_tri_indices[1]],
+        'HG_stat': hg_result
+    }, columns=['gene_1', 'gene_2', 'HG_stat'])
+    return output
+
+
+
+def ranker(pair,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in_cls_count):
+    """
+    :param pair: table w/ gene_1, gene_2, HG_stat as columns (DataFrame (DF) )
+    :param other_sing_tp_tn: TP/TN values for singletons in all other clusters (dict of DFs)
+    :param other_pair_tp_tn: TP/TN values for pairs in all other clusters (dict of DFs)
+    :param cls_counts: # of cells in a given cluster (dict of DFs)
+    **
+    All dicts have style: 
+    key -> cluster number
+    value -> data
+    **
+
+    Statistic to calculate is :
+    MAX across all clusters of (TN_after - TN_before) / N
+    (In the future will add + TP term)
+    where:
+    TN_after = TN of gene combo
+    TN_before = TN of initial gene from pair
+    N = # of cells in the cluster
+
+
+    returns: New pair table w/ new columns and ranks.
+    ranked-pair is a DEEP copy of pair, meaning value changes in it
+    are not reflected in pair 
+    
+
+    TODO:
+
+    X - re-sort pair table by HG stat
+    X - give initial rank value based on this sort
+
+    X - compute our statistic for each pair
+    X - give a second rank value based on this best score
+
+    X - average two ranks for final rank
+    X - sort the table according to final rank
+    X - convert finrank from decimal to integer
+
+    ** so we will be adding 1+1+1+1 = 4 new columns **
+    (initrank, cluster_clean_score, CCSrank, rank)
+    
+    This then replaces the old 'pair' with a new 'pair'
+    which just gets passed along as usual
+    (minus the HG stat sort in the process loop)
+    """
+
+    def ranked_stat(index,row,cls_counts,other_pair_tp_tn,other_sing_tp_tn,in_cls_count):
+        gene_1 = row[0]
+        gene_2 = row[1]
+        stats=[]
+        stats_debug = {}
+        for clstrs in cls_counts:
+            #this small cluster ignoring doesnt really matter when using
+            #the sum and not the max
+            #if cls_counts[clstrs] <= ( .1 * in_cls_count):
+            #    continue
+            TN_before = other_sing_tp_tn[clstrs].loc[gene_1]['TN']
+            TN_after = other_pair_tp_tn[clstrs].loc[(gene_1,gene_2),'TN']
+            N = cls_counts[clstrs]
+            value = ( TN_after - TN_before ) / N
+            stats.append(value)
+            stats_debug[clstrs] = value
+        stat = sum(stats)
+        return stat,stats_debug
+
+    ranked_pair = pair.copy()
+    ranked_pair.sort_values(by='HG_stat',ascending=True,inplace=True)
+    ranked_pair['initrank'] = ranked_pair.reset_index().index + 1
+    #below not used because this does ALL pairs (too many)
+    #ranked_pair['CCS'] = ranked_pair.apply(ranked_stat,axis=1,args=(cls_counts,other_pair_tp_tn,other_sing_tp_tn))
+    count = 1
+    for index,row in ranked_pair.iterrows():
+        #if ranked_pair.loc[index,'HG_stat'] >= .05:
+        #    break
+        if count == 1000:
+            break
+        ranked_pair.loc[index,'CCS'],stats_debug = ranked_stat(index,row,cls_counts,other_pair_tp_tn,other_sing_tp_tn,in_cls_count)
+        for key in stats_debug:
+            ranked_pair.loc[index,'CCS_cluster_'+str(key)] = stats_debug[key]
+            
+        count = count + 1
+
+    ranked_pair.sort_values(by='CCS',ascending=False,inplace=True)
+    #print(ranked_pair)
+    ranked_pair['CCSrank'] = ranked_pair.reset_index().index + 1
+    #print(ranked_pair)
+    ranked_pair['finalrank'] = ranked_pair[['initrank', 'CCSrank']].mean(axis=1)
+    #print(ranked_pair)
+    ranked_pair.sort_values(by='finalrank',ascending=True,inplace=True)
+    #print(ranked_pair)
+    ranked_pair['rank'] = ranked_pair.reset_index().index + 1
+    #print(ranked_pair)
+    ranked_pair.drop('finalrank',axis=1,inplace=True)
+    omit_genes = {}
+    count = 0
+    #For debug ony, gives column w/ each cluster's CCS 
+    for index,row in ranked_pair.iterrows():
+        if count == 100:
+            break
+        if row[0] in omit_genes:
+            if omit_genes[row[0]] > 10:
+                ranked_pair.loc[index,'Plot'] = 0
+            else:
+                ranked_pair.loc[index,'Plot'] = 1
+                omit_genes[row[0]] = omit_genes[row[0]]+1
+                count = count + 1
+        else:
+            omit_genes[row[0]] = 1
+            ranked_pair.loc[index,'Plot'] = 1
+            count = count + 1
+    #print(ranked_pair)
+    
+    return ranked_pair
+
+
+def pair_tp_tn(gene_map, in_cls_count, pop_count, in_cls_product,
+               total_product, upper_tri_indices):
+    """Finds simple true positive/true negative values for the cluster of
+    interest, for all possible pairs of genes.
+
+    :param gene_map: An Index mapping index values to gene names.
+    :param in_cls_count: The number of cells in the cluster.
+    :param pop_count: The number of cells in the population.
+    :param in_cls_product: The cluster paired expression count matrix.
+    :param total_product: The population paired expression count matrix.
+    :param upper_tri_indices: An array specifying UT indices; from numpy.utri
+    :param cluster_exp_matrices: dict containing expression matrices of 
+         all clusters except the cluster of interest
+
+    :returns: A matrix with arbitary row indices and 4 columns: containing the
+              two genes of the pair, then true positive and true negative
+              values respectively.  Their names are 'gene_1', 'gene_2', 'TP',
+              and 'TN'.
+
+    :rtype: pandas.DataFrame
+
+    """
+
+
+
+    
+    def tp(taken_in_cls):
+        return taken_in_cls / in_cls_count
+
+    def tn(taken_in_cls, taken_in_pop):
+        return (
+            ((pop_count - in_cls_count) - (taken_in_pop - taken_in_cls))
+            / (pop_count - in_cls_count)
+        )
+    tp_result = np.vectorize(tp)(in_cls_product[upper_tri_indices])
+    tn_result = np.vectorize(tn)(
+        in_cls_product[upper_tri_indices], total_product[upper_tri_indices]
+    )
+
+    
+    output = pd.DataFrame({
+        'gene_1': gene_map[upper_tri_indices[0]],
+        'gene_2': gene_map[upper_tri_indices[1]],
+        'TP': tp_result,
+        'TN': tn_result
+    }, columns=['gene_1', 'gene_2', 'TP', 'TN'])
+
+    return output
