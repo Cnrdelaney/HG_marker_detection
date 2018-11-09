@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 #
@@ -202,3 +203,23 @@ epub_exclude_files = ['search.html']
 
 # Example configuration for intersphinx: refer to the Python standard library.
 intersphinx_mapping = {'https://docs.python.org/': None}
+=======
+import os
+import sys
+
+sys.path.insert(0, os.path.abspath('../..'))
+extensions = [
+    'sphinx.ext.autodoc', ]
+
+project = 'COMET'
+copyright = '2018, Aaron Yao-Smith'
+author = 'Aaron Yao-Smith'
+version = '0.1'
+release = '0.1'
+templates_path = ['_templates']
+source_suffix = '.rst'
+master_doc = 'index'
+pygments_style = 'sphinx'
+html_theme = 'alabaster'
+html_static_path = ['_static']
+>>>>>>> caafb05e5fc4858f6954dc62b779d1ce4f00e045

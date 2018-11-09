@@ -11,6 +11,7 @@ import sys
 import multiprocessing
 import time
 import math
+import matplotlib.pyplot as plt
 #from docs.source import conf
 
 
@@ -90,6 +91,7 @@ def read_data(cls_path, tsne_path, marker_path, gene_path):
 def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_path,pickle_path,cluster_number):
     #for cls in clusters:
     # To understand the flow of this section, read the print statements.
+    start_cls_time = time.time()
     print('########\n# Processing cluster ' + str(cls) + '...\n########')
     print('Running t test on singletons...')
     t_test = hgmd.batch_t(marker_exp, cls_ser, cls)
@@ -98,35 +100,53 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
     # We need to slide the cutoff indices before using them,
     # to be sure they can be used in the real world. See hgmd.mhg_slide()
     cutoff_value = hgmd.mhg_cutoff_value(
-        marker_exp, xlmhg[['gene', 'mHG_cutoff']]
+        marker_exp, xlmhg[['gene_1', 'mHG_cutoff']]
     )
-    xlmhg = xlmhg[['gene', 'HG_stat', 'mHG_pval']].merge(
-        hgmd.mhg_slide(marker_exp, cutoff_value), on='gene'
+    xlmhg = xlmhg[['gene_1', 'HG_stat', 'mHG_pval']].merge(
+        hgmd.mhg_slide(marker_exp, cutoff_value), on='gene_1'
     )
     # Update cutoff_value after sliding
     cutoff_value = pd.Series(
-        xlmhg['cutoff_val'].values, index=xlmhg['gene']
+        xlmhg['cutoff_val'].values, index=xlmhg['gene_1']
     )
+    xlmhg = xlmhg\
+        .sort_values(by='HG_stat', ascending=True)
+
+    ###########
+    #TRIPS EXPERIMENTAL
+    count = 0
+    trips_list=[]
+    for index,row in xlmhg.iterrows():
+        if count == 200:
+            break
+        else:
+            trips_list.append(row[0])
+            count = count + 1
+    ############
+    
     print('Creating discrete expression matrix...')
     discrete_exp = hgmd.discrete_exp(marker_exp, cutoff_value)
-    #print(np.transpose(discrete_exp))
-    #print(discrete_exp)
+
+    discrete_exp_full = discrete_exp.copy()
+    print('Finding simple true positives/negatives for singletons...')
+    #Gives us the singleton TP/TNs for COI and for rest of clusters
+    #COI is just a DF, rest of clusters are a dict of DFs
+    (sing_tp_tn, other_sing_tp_tn) = hgmd.tp_tn(discrete_exp, cls_ser, cls, cluster_number)
+    
     print('Finding pair expression matrix...')
     (
         gene_map, in_cls_count, pop_count,
         in_cls_product, total_product, upper_tri_indices,
-        ##NEW VALUES HERE
         cluster_exp_matrices, cls_counts
     ) = hgmd.pair_product(discrete_exp, cls_ser, cls, cluster_number)
-    #print(in_cls_product)
-    #print(total_product)
-    #print(in_cls_count)
-    #print(pop_count)
 
-    #print('Finding Trips expression matrix...')
-    #trips = hgmd.combination_product(discrete_exp,cls_ser,cls)
-    print('end of func')
-    time.sleep(1000)
+
+    start_trips = time.time()
+    print('Finding Trips expression matrix...')
+    trips_in_cls,trips_total,trips_indices,gene_1_mapped,gene_2_mapped,gene_3_mapped = hgmd.combination_product(discrete_exp,cls_ser,cls,trips_list)
+    end_trips = time.time()
+    print(str(end_trips-start_trips) + ' seconds')
+    
     HG_start = time.time()
     print('Running hypergeometric test on pairs...')
     pair = hgmd.pair_hg(
@@ -135,10 +155,25 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
     )
     HG_end = time.time()
     print(str(HG_end-HG_start) + ' seconds')
-    print('Finding simple true positives/negatives for singletons...')
-    #Gives us the singleton TP/TNs for COI and for rest of clusters
-    #COI is just a DF, rest of clusters are a dict of DFs
-    (sing_tp_tn, other_sing_tp_tn) = hgmd.tp_tn(discrete_exp, cls_ser, cls, cluster_number)
+    
+    pair_out_initial = pair\
+    .sort_values(by='HG_stat', ascending=True)
+    
+    pair_out_initial['rank'] = pair_out_initial.reset_index().index + 1
+    pair_out_initial.to_csv(
+    csv_path + '/cluster_' + str(cls) + '_pair_init_rank.csv'
+    )
+    
+    HG_start = time.time()
+    print('Running hypergeometric test on trips DEBUG...')
+    trips = hgmd.trips_hg(
+        gene_map,in_cls_count,pop_count,
+        trips_in_cls,trips_total,trips_indices,
+        gene_1_mapped,gene_2_mapped,gene_3_mapped
+    )
+    #print(trips)
+    HG_end = time.time()
+    print(str(HG_end-HG_start) + ' seconds')
 
 
 
@@ -148,7 +183,6 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
         gene_map, in_cls_count, pop_count,
         in_cls_product, total_product, upper_tri_indices
     )
-
     #accumulates pair TP/TN vals for all other clusters
     ##NEW
     other_pair_tp_tn = {}
@@ -159,22 +193,34 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
         )
         other_pair_tp_tn[key] = new_pair_tp_tn
         other_pair_tp_tn[key].set_index(['gene_1','gene_2'],inplace=True)
-
+    #print('Finding simple true positives/negatives for trips...')
+    #trips_tp_tn = hgmd.trips_tp_tn(
+    #    gene_map, in_cls_count, pop_count,
+    #    trips_in_cls,trips_total,trips_indices,
+    #    gene_1_mapped,gene_2_mapped
+    #)
+    pair = pair\
+        .merge(pair_tp_tn, on=['gene_1', 'gene_2'], how='left')
+    pair_tp_tn.set_index(['gene_1','gene_2'],inplace=True)
+    sing_tp_tn.set_index(['gene_1'], inplace=True)
     rank_start = time.time()
     print('Finding NEW Rank')
-    ranked_pair = hgmd.ranker(pair,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in_cls_count)
+    ranked_pair,histogram = hgmd.ranker(pair,xlmhg,sing_tp_tn,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in_cls_count)
     rank_end = time.time()
     print(str(rank_end - rank_start) + ' seconds')
+
+    
     
     # Save TP/TN values to be used for non-cluster-specific things
     print('Pickling data for later...')
     sing_tp_tn.to_pickle(pickle_path + 'sing_tp_tn_' + str(cls))
     pair_tp_tn.to_pickle(pickle_path + 'pair_tp_tn_' + str(cls))
+    #trips_tp_tn.to_pickle(pickle_path + 'trips_tp_tn' + str(cls))
     print('Exporting cluster ' + str(cls) + ' output to CSV...')
     sing_output = xlmhg\
-        .merge(t_test, on='gene')\
-        .merge(sing_tp_tn, on='gene')\
-        .set_index('gene')\
+        .merge(t_test, on='gene_1')\
+        .merge(sing_tp_tn, on='gene_1')\
+        .set_index('gene_1')\
         .sort_values(by='HG_stat', ascending=True)
     sing_output['rank'] = sing_output.reset_index().index + 1
     sing_output.to_csv(
@@ -182,26 +228,38 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
     )
     sing_stripped = sing_output[
         ['HG_stat', 'TP', 'TN']
-    ].reset_index().rename(index=str, columns={'gene': 'gene_1'})
+    ].reset_index().rename(index=str, columns={'gene_1': 'gene_1'})
     
     ##########
     #change to reflect ranked_pair
     ##########
     #print('yabada')
     #print(pair)
-    pair_output = ranked_pair\
-        .merge(pair_tp_tn, on=['gene_1', 'gene_2'], how='left')
+    #pair_output = ranked_pair\
+    #    .merge(pair_tp_tn, on=['gene_1', 'gene_2'], how='left')
     #print(pair)
     #pair_output['rank'] = pair_output.reset_index().index + 1
-    pair_output.to_csv(
-        csv_path + '/cluster_' + str(cls) + '_pair.csv'
+    ranked_pair.to_csv(
+        csv_path + '/cluster_' + str(cls) + '_pair_ranked.csv'
+    )
+    #Add trips data pages
+    #does not currently do new rank scheme
+    trips_output = trips\
+        .sort_values(by='HG_stat', ascending=True)
+    #print(trips_output)
+    trips_output['rank'] = trips_output.reset_index().index + 1
+    trips_output.to_csv(
+        csv_path + '/cluster_' + str(cls) + '_trips.csv'
     )
     print('Drawing plots...')
+    plt.bar(list(histogram.keys()), histogram.values(), color='b')
+    plt.savefig(vis_path + '/cluster_' + str(cls) + '_pair_histogram')
     vis.make_plots(
-        pair=pair_output,
+        pair=ranked_pair,
         sing=sing_output,
+        trips=trips_output,
         tsne=tsne,
-        discrete_exp=discrete_exp,
+        discrete_exp=discrete_exp_full,
         marker_exp=marker_exp,
         plot_pages=plot_pages,
         combined_path=vis_path + '/cluster_' + str(cls) + '_combined.pdf',
@@ -209,9 +267,12 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
         str(cls) + '_singleton_combined.pdf',
         discrete_path=vis_path + '/cluster_' + str(cls) + '_discrete.pdf',
         tptn_path=vis_path + 'cluster_' + str(cls) + '_TP_TN.pdf',
-        sing_tptn_path=vis_path + 'cluster_' +
-        str(cls) + '_singleton_TP_TN.pdf'
-    )
+        trips_path=vis_path + 'cluster_' + str(cls) + '_discrete_trios.pdf',
+        sing_tptn_path=vis_path + 'cluster_' + str(cls) + '_singleton_TP_TN.pdf'
+        )
+    end_cls_time=time.time()
+    print(str(end_cls_time - start_cls_time) + ' seconds')
+    #time.sleep(10000)
 
 
 def main():
@@ -282,7 +343,6 @@ def main():
         )
     print("Generating complement data...")
     marker_exp = hgmd.add_complements(no_complement_marker_exp)
-
 
     
     # Process clusters sequentially

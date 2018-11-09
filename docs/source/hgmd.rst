@@ -1,0 +1,2 @@
+.. automodule:: hgmd.hgmd
+    :members:

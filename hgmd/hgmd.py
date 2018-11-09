@@ -14,6 +14,7 @@ import numpy as np
 import xlmhg as hg
 import scipy.stats as ss
 import time
+import math
 
 # TODO: idea, replace 'gene_1', 'gene_2', and 'gene' columns with
 # indices/multi-indices
@@ -88,7 +89,7 @@ def batch_xlmhg(marker_exp, c_list, coi, X=None, L=None):
         )
     )
     output = pd.DataFrame()
-    output['gene'] = xlmhg.index
+    output['gene_1'] = xlmhg.index
     output[['HG_stat', 'mHG_cutoff', 'mHG_pval']] = pd.DataFrame(
         xlmhg.values.tolist(),
         columns=['HG_stat', 'mHG_cutoff', 'mHG_pval']
@@ -121,7 +122,7 @@ def batch_t(marker_exp, c_list, coi):
         )
     )
     output = pd.DataFrame()
-    output['gene'] = t.index
+    output['gene_1'] = t.index
     output[['t_stat', 't_pval']] = pd.DataFrame(
         t.values.tolist(),
         columns=['t_stat', 't_pval']
@@ -157,7 +158,7 @@ def mhg_cutoff_value(marker_exp, cutoff_ind):
     """
 
     def find_val(row):
-        gene = row['gene']
+        gene = row['gene_1']
         val = marker_exp[gene].sort_values(
             ascending=False).iloc[row['mHG_cutoff']]
         if re.compile(".*_c$").match(gene):
@@ -165,7 +166,7 @@ def mhg_cutoff_value(marker_exp, cutoff_ind):
         else:
             return val + FLOAT_PRECISION
 
-    cutoff_ind.index = cutoff_ind['gene']
+    cutoff_ind.index = cutoff_ind['gene_1']
     cutoff_val = cutoff_ind.apply(
         find_val, axis='columns'
     ).rename('cutoff_val')
@@ -200,11 +201,11 @@ def mhg_slide(marker_exp, cutoff_val):
 
     :rtype: pandas.DataFrame
     """
-    cutoff_val.index = cutoff_val['gene']
+    cutoff_val.index = cutoff_val['gene_1']
     cutoff_ind = cutoff_val.apply(
         lambda row:
         np.searchsorted(
-            -marker_exp[row['gene']].sort_values(ascending=False).values,
+            -marker_exp[row['gene_1']].sort_values(ascending=False).values,
             -row['cutoff_val'], side='left'
         ),
         axis='columns'
@@ -213,7 +214,7 @@ def mhg_slide(marker_exp, cutoff_val):
     output['mHG_cutoff'] = cutoff_ind
     # Reorder and remove redundant row index
     output = output.reset_index(
-        drop=True)[['gene', 'mHG_cutoff', 'cutoff_val']]
+        drop=True)[['gene_1', 'mHG_cutoff', 'cutoff_val']]
     return output
 
 
@@ -272,12 +273,12 @@ def tp_tn(discrete_exp, c_list, coi, cluster_number):
             )
         )
         sing_cluster_exp_matrices[clstrs+1] = pd.DataFrame()
-        sing_cluster_exp_matrices[clstrs+1]['gene'] = tp_tn.index
+        sing_cluster_exp_matrices[clstrs+1]['gene_1'] = tp_tn.index
         sing_cluster_exp_matrices[clstrs+1][['TP', 'TN']] = pd.DataFrame(
             tp_tn.values.tolist(),
             columns=['TP', 'TN']
         )
-        sing_cluster_exp_matrices[clstrs+1].set_index('gene',inplace=True)
+        sing_cluster_exp_matrices[clstrs+1].set_index('gene_1',inplace=True)
         
 
     #does our cluster of interest
@@ -290,7 +291,7 @@ def tp_tn(discrete_exp, c_list, coi, cluster_number):
         )
     )
     output = pd.DataFrame()
-    output['gene'] = tp_tn.index
+    output['gene_1'] = tp_tn.index
     output[['TP', 'TN']] = pd.DataFrame(
         tp_tn.values.tolist(),
         columns=['TP', 'TN']
@@ -352,18 +353,22 @@ def pair_product(discrete_exp, c_list, coi, cluster_number):
         if clstrs+1 == coi:
             pass
         else:
-            cluster_exp_matrices[clstrs+1] = discrete_exp[c_list == clstrs+1].values
-            
-            cluster_exp_matrices[clstrs+1]=np.matmul(np.transpose(cluster_exp_matrices[clstrs+1]),cluster_exp_matrices[clstrs+1] )
+            cluster_exp_matrices[clstrs+1] = discrete_exp[c_list == (clstrs+1)].values
             cls_counts[clstrs+1] = np.size(cluster_exp_matrices[clstrs+1],0)
-        
-        
+            cluster_exp_matrices[clstrs+1]=np.matmul(np.transpose(cluster_exp_matrices[clstrs+1]),cluster_exp_matrices[clstrs+1] )
+
     in_cls_count = np.size(in_cls_matrix, 0)
     pop_count = np.size(total_matrix, 0)
+    first = time.time()
+    #print(np.transpose(in_cls_matrix).shape)
+    #print(in_cls_matrix.shape)
     in_cls_product = np.matmul(np.transpose(in_cls_matrix), in_cls_matrix)
+    second = time.time()
+    #print(str(second-first) + 'pair in cls mult seconds')
     total_product = np.matmul(np.transpose(total_matrix), total_matrix)
     upper_tri_indices = np.triu_indices(gene_map.size,1)
-    print(type(in_cls_product))
+    #print(upper_tri_indices)
+    
     return (
         gene_map,
         in_cls_count, pop_count,
@@ -371,8 +376,10 @@ def pair_product(discrete_exp, c_list, coi, cluster_number):
         upper_tri_indices, cluster_exp_matrices, cls_counts
     )
 
+  
+    
 
-def combination_product(discrete_exp,c_list,coi):
+def combination_product(discrete_exp,c_list,coi,trips_list):
     '''
     Makes the count matrix for combinations of K genes where K > 2 :)
 
@@ -386,49 +393,231 @@ def combination_product(discrete_exp,c_list,coi):
 
     Once the first step is complete, simply multiply using np.matmul to get the gene by gene
     matrix. Need to also make a new gene_map
+
+    More in-depth Description:
+    the trips matrix is a gene/gene pair by gene matrix. TO construct, we first perform an AND 
+    operation on each given row with a different row from the same matrix(X&X), we use two 
+    identical matrices and loop through most combinations. The code SKIPS any entry that would be
+    the same pair (e.g. AA) and also doesn't do inverses of already counted pairs
+    (e.g. do AB, dont do BA). this gives us a somewhat unique looking rectangular matrix that isnt
+    quit N^2 long. From here, we  multiply by the original matrix to get our full gene expression
+    count matrix. To be absolutely clear, the matrices we use to construct the ~N^2 gene pair 
+    matrix are actually the original discrete expression matrix transposed so that the genes
+    and cells end up in the right place. We do this for our cluster and the total population,
+    just as in the pair case. After this, we need to make a smarter gene mapping since the
+    terms are not as easy to predict as in a square matrix. To do this, a pattern was determined
+    (specifically, the pairs follow the N'th triangular number scheme), so from there we construct
+    the full mapping for genes 1 & 2 to be used later in the data table. 'Trips_indices' gives us
+    the indices for the entire rectangular matrix, something to feed into the vectorized HG & TPTN
+    when we get there. Gene 3 mapping follows these indices so there is no separate mapping.
+
     '''
 
-
     def trips_matrix_gen(matrix):
-        trips_in_cls_matrix = []
+        Cth = time.time()
+        trips_matrix_list = []
         row1count = 1
         for row1 in np.transpose(matrix):
             row2count = 1
             for row2 in np.transpose(matrix):
-                if row1count==row2count:
-                    row2count <= row2count+1
+                #print('row1')
+                #print(row1count)
+                #print(row1)
+                #print('row2')
+                #print(row2count)
+                #print(row2)
+                if row2count<=row1count:
+                    row2count = row2count+1
+                    #print('not added')
+                    #print('')
                     continue
-                trips_in_cls_matrix.append([row1&row2])
+                #print('')
+                trips_matrix_list.append(row1&row2)
                 row2count=row2count+1
             row1count = row1count + 1
                 #print(row1)
                 #print(row2)
                 #print('AND HERE')
         #trips_matrix is in cluster combo gene by cell
-        trips_matrix = np.array(trips_in_cls_matrix)
-        #trips_in_cls_product is in cluster count matrix, gene pair by gene
-        #Has special structure to reduce size of matrix
-        #e.g. genes A,B,C,D ->
-        # Only does combo rows for AB,AC,AD,BC,BD,CD
-        trips_in_cls_product = np.matmul(trips_matrix,matrix)
-        print(trips_in_cls_product)
-        print(trips_in_cls_product.size)
-        trips_count = np.size(trips_matrix)
-        time.sleep(1000)
-        return trips_in_cls_product,trips_count
+        Ath = time.time()
+        trips_matrix = np.asarray(trips_matrix_list)
+        #print(trips_matrix.shape)
+        #print(matrix.shape)
+        trips_product = np.matmul(trips_matrix,matrix)
+        Bth = time.time()
+        print(str(Bth-Ath) + ' mult seconds')
+        return trips_product
+        '''
+        row_num = len(trips_matrix_list)
+        #print(row_num)
+        #print('')
+        A_lower = 0
+        A_upper= int(row_num / 4) 
+        B_lower = int(row_num / 4)  
+        B_upper = int(row_num / 2) 
+        C_lower = int(row_num / 2) 
+        C_upper = int(row_num * 3 / 4) 
+        D_lower = int(row_num * 3 / 4) 
+        D_upper = int(row_num)
+        trips_matrix_A = np.asarray(trips_matrix_list[A_lower:A_upper])
+        trips_matrix_B = np.asarray(trips_matrix_list[B_lower:B_upper])
+        trips_matrix_C = np.asarray(trips_matrix_list[C_lower:C_upper])
+        trips_matrix_D = np.asarray(trips_matrix_list[D_lower:D_upper])
+        #print(trips_in_cls_product)
+        #print(trips_in_cls_product.size)
+        #time.sleep(1000)
+        AAth = time.time()
+        print('A mult:')
+        print(trips_matrix_A.shape)
+        print(matrix.shape)
+        trips_in_cls_product_A = np.matmul(trips_matrix_A,matrix)
+        BAth = time.time()
+        print(str(BAth-AAth) + 'A mult time')
+        trips_in_cls_product_B = np.matmul(trips_matrix_B,matrix)
+        trips_in_cls_product_C = np.matmul(trips_matrix_C,matrix)
+        trips_in_cls_product_D = np.matmul(trips_matrix_D,matrix)
+        ABth = time.time()
+        print(str(ABth-AAth) + 'mult time')
+        return (
+            trips_in_cls_product_A,trips_in_cls_product_B,
+            trips_in_cls_product_C,trips_in_cls_product_D
+            )
+        '''
+    ###############
+    #Experimental Section
+    #print(trips_list)
+    for column in discrete_exp:
+        #print(column)
+        if str(column) in trips_list:
+            continue
+        else:
+            discrete_exp.drop(column, axis=1,inplace=True)
+    ################
     
     in_cls_matrix = discrete_exp[c_list == coi].values
     total_matrix = discrete_exp.values
-    print(np.transpose(in_cls_matrix))
-    print(np.transpose(total_matrix))
-    axes = len(discrete_exp.columns)
-    #trips
-    #gene_map_cols = discrete_exp.columns
-    #time.sleep(1000)
-    return (
-        trips_in_cls_product,trips_total_product
-        )
+    
+    start_time = time.time()
+    in_cls_matrix = discrete_exp[c_list == coi].values
+    total_matrix = discrete_exp.values
+    #print(np.transpose(in_cls_matrix))
+    #print(np.transpose(total_matrix))
+    gene_count = len(discrete_exp.columns)
+    #print(gene_count)
+    #time.sleep(100)
+    first = time.time()
+    trips_in_cls_product = trips_matrix_gen(in_cls_matrix)
+    trips_total_product = trips_matrix_gen(in_cls_matrix)
+    '''
+    trips_matrix_A,trips_matrix_B,trips_matrix_C,trips_matrix_D = trips_matrix_gen(in_cls_matrix)
+    trips_in_cls_product_1 = np.append(trips_matrix_A,trips_matrix_B,axis=0)
+    trips_in_cls_product_2 = np.append(trips_matrix_C,trips_matrix_D,axis=0)
+    trips_in_cls_product = np.append(trips_in_cls_product_1,trips_in_cls_product_2,axis=0)
+    second = time.time()
+    print(str(second-first) + ' in cls total')
+    trips_matrix_A,trips_matrix_B,trips_matrix_C,trips_matrix_D = trips_matrix_gen(total_matrix)
+    trips_total_product_1 = np.append(trips_matrix_A,trips_matrix_B,axis=0)
+    trips_total_product_2 = np.append(trips_matrix_C,trips_matrix_D,axis=0)
+    trips_total_product = np.append(trips_total_product_1,trips_total_product_2,axis=0)
+    third = time.time()
+    print(str(third-second) + ' out cls total')
+    '''
+    #print(in_cls_matrix)
+    #print('')
+    #print(total_matrix)
+    #print('')
+    #print(trips_in_cls_product)
+    #print('')
+    #print(trips_total_product)
 
+
+    #make a row-wise gene_map scheme
+    gene_map = discrete_exp.columns.values
+    #print(gene_map)
+    #print(type(gene_map))
+
+    
+    gene_1_mapped = []
+    count = 0
+    for gene in gene_map:
+        for x in range(gene_count-1-count):
+            for n in range(gene_count):
+                gene_1_mapped.append(gene)
+        count = count + 1
+    gene_1_mapped = pd.Index(gene_1_mapped)
+
+    gene_3_mapped = []
+    val = int(len(gene_1_mapped)/gene_count)
+    for x in range(val):
+        count = 0
+        for gene in gene_map:
+            gene_3_mapped.append(gene_map[count])
+            count = count + 1
+    gene_3_mapped = pd.Index(gene_3_mapped)
+    gene_2_mapped = []
+    for x in range(gene_count-1):
+        count = 0
+        for gene in gene_map:
+            if count == 0:
+                count = count + 1
+                continue
+            for n in range(gene_count):
+                gene_2_mapped.append(gene_map[count])
+            count = count + 1
+        gene_map = np.delete(gene_map,0)
+    gene_2_mapped = pd.Index(gene_2_mapped)
+
+                            
+
+    
+
+
+    #print(gene_1_mapped)
+    #print(len(gene_1_mapped))
+    #print(gene_2_mapped)
+    #print(len(gene_2_mapped))
+    #print(gene_3_mapped)
+    #print(len(gene_3_mapped))
+    #time.sleep(10000)
+    #print(type(gene_2_mapped))
+    #print(discrete_exp.columns)
+    #print(type(discrete_exp.columns))
+    #time.sleep(10000)
+
+    #indices for computation
+    row_count = int((gene_count*(gene_count-1))/2)
+    #column coordinate
+    list_one_ = []
+    for numm in range(row_count):
+        for num in range(gene_count):
+            list_one_.append(num)
+    #print(list_one_)
+    list_one = np.array(list_one_)
+    #row coordinate
+    list_two_ = []
+    for num in range(row_count):
+        for numm in range(gene_count):
+            list_two_.append(num)
+    #print(list_two_)
+    list_two = np.array(list_two_)
+    
+    trips_indices = ( list_two , list_one )
+    #print(trips_indices)
+    fourth = time.time()
+    #print(str(fourth-third) + ' index and gene mapping time')
+    #print(gene_1_mapped)
+    #print(len(gene_1_mapped))
+    #print('')
+    #print(gene_2_mapped)
+    #print(len(gene_2_mapped))
+    #print('')
+    #print(trips_indices)
+    #print(trips_in_cls_product.shape)
+    #print(trips_total_product.shape)
+    return (
+        trips_in_cls_product,trips_total_product,trips_indices,
+        gene_1_mapped,gene_2_mapped,gene_3_mapped
+        )
 
 
 def pair_hg(gene_map, in_cls_count, pop_count, in_cls_product, total_product,
@@ -492,6 +681,9 @@ def pair_hg(gene_map, in_cls_count, pop_count, in_cls_product, total_product,
     #return output
 
 
+    #print(in_cls_product.shape)
+    #print(total_product.shape)
+
     #OLD CODE
     vhg = np.vectorize(ss.hypergeom.sf, excluded=[1, 2, 4], otypes=[np.float])
 
@@ -503,6 +695,12 @@ def pair_hg(gene_map, in_cls_count, pop_count, in_cls_product, total_product,
         total_product[upper_tri_indices],
         loc=1
     )
+    #print(in_cls_product)
+    #print(in_cls_product[upper_tri_indices])
+    #print(total_product)
+    #print(total_product[upper_tri_indices])
+    #print(hg_result)
+    #print(gene_map)
     output = pd.DataFrame({
         'gene_1': gene_map[upper_tri_indices[0]],
         'gene_2': gene_map[upper_tri_indices[1]],
@@ -512,9 +710,10 @@ def pair_hg(gene_map, in_cls_count, pop_count, in_cls_product, total_product,
 
 
 
-def ranker(pair,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in_cls_count):
+def ranker(pair,xlmhg,sing_tp_tn,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in_cls_count):
     """
     :param pair: table w/ gene_1, gene_2, HG_stat as columns (DataFrame (DF) )
+    :param xlmhg: DF of mHG stats for each gene(for testing lead vs follow gene in pair)
     :param other_sing_tp_tn: TP/TN values for singletons in all other clusters (dict of DFs)
     :param other_pair_tp_tn: TP/TN values for pairs in all other clusters (dict of DFs)
     :param cls_counts: # of cells in a given cluster (dict of DFs)
@@ -531,7 +730,11 @@ def ranker(pair,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in_cls_count):
     TN_after = TN of gene combo
     TN_before = TN of initial gene from pair
     N = # of cells in the cluster
-
+    
+    THRESHOLDING:
+    -We are only gonna take the first 100 appearances for each gene in all the pairs
+    -'Lead' gene is one with smallest p val
+    -
 
     returns: New pair table w/ new columns and ranks.
     ranked-pair is a DEEP copy of pair, meaning value changes in it
@@ -558,46 +761,108 @@ def ranker(pair,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in_cls_count):
     (minus the HG stat sort in the process loop)
     """
 
-    def ranked_stat(index,row,cls_counts,other_pair_tp_tn,other_sing_tp_tn,in_cls_count):
-        gene_1 = row[0]
-        gene_2 = row[1]
+    def ranked_stat(gene_1,gene_2,lead_gene,cls_counts,other_pair_tp_tn,other_sing_tp_tn,in_cls_count):
         stats=[]
         stats_debug = {}
         for clstrs in cls_counts:
             #this small cluster ignoring doesnt really matter when using
             #the sum and not the max
-            #if cls_counts[clstrs] <= ( .1 * in_cls_count):
+            #if cls_counts[clstrs] <= ( .05 * in_cls_count):
             #    continue
-            TN_before = other_sing_tp_tn[clstrs].loc[gene_1]['TN']
+            TN_before = other_sing_tp_tn[clstrs].loc[lead_gene]['TN']
             TN_after = other_pair_tp_tn[clstrs].loc[(gene_1,gene_2),'TN']
             N = cls_counts[clstrs]
-            value = ( TN_after - TN_before ) / N
+            value =  ( TN_after - TN_before ) / N 
             stats.append(value)
             stats_debug[clstrs] = value
-        stat = sum(stats)
-        return stat,stats_debug
-
+        stat1 = sum(stats)
+        #stats.remove(stat1)
+        #stat2 = max(stats)
+        #stat= stat1+stat2
+        return stat1,stats_debug
+    xlmhg_cop = xlmhg.copy()
+    xlmhg_cop = xlmhg_cop.set_index('gene_1')
     ranked_pair = pair.copy()
     ranked_pair.sort_values(by='HG_stat',ascending=True,inplace=True)
     ranked_pair['initrank'] = ranked_pair.reset_index().index + 1
+    #print(ranked_pair)
+    
     #below not used because this does ALL pairs (too many)
     #ranked_pair['CCS'] = ranked_pair.apply(ranked_stat,axis=1,args=(cls_counts,other_pair_tp_tn,other_sing_tp_tn))
+    omit_pairs = {}
     count = 1
     for index,row in ranked_pair.iterrows():
-        #if ranked_pair.loc[index,'HG_stat'] >= .05:
-        #    break
+        #print(row[0])
+        #print(row[1])
+        
+            
+        if row[0] in omit_pairs:
+            if omit_pairs[row[0]] > 200:
+                ranked_pair.drop(index, inplace=True)
+                continue
+        if row[1] in omit_pairs:
+            if omit_pairs[row[1]] > 200:
+                ranked_pair.drop(index, inplace=True)
+                continue
+
+        gene_1 = row[0]
+        gene_2 = row[1]
+        #determine which of the two genes is 'lead'
+        stat_1 = xlmhg_cop.loc[gene_1,'HG_stat']
+        stat_2 = xlmhg_cop.loc[gene_2,'HG_stat']
+        if stat_1 <= stat_2:
+            lead_gene=gene_1
+            follow_gene = gene_2
+        else:
+            lead_gene=gene_2
+            follow_gene = gene_1
+
+        #if follow_gene[-2:] == '_c':
+        #    if row[-2] - sing_tp_tn.loc[(follow_gene),'TN'] < .1:
+        #        ranked_pair.drop(index, inplace=True)
+        #        print('COMPDROP')
+        #        continue
+        #after - before
+        #TN rate must improve by .5% at least
+        TN_bef = sing_tp_tn.loc[(lead_gene),'TN']
+        if row[-2] - TN_bef < .01:
+            ranked_pair.drop(index, inplace=True)
+            #print('TN drop')
+            continue
+        #before - after
+        #TP rate cannot decrease by more than 5%
+        #TP_bef = sing_tp_tn.loc[(lead_gene),'TP']
+        #if TP_bef-row[-3] < .0005:
+        #    ranked_pair.drop(index, inplace=True)
+        #    print('TP drop')
+        #continue
+
+
+        if row[0] in omit_pairs:
+            omit_pairs[row[0]] = omit_pairs[row[0]] + 1
+        if row[1] in omit_pairs:
+            omit_pairs[row[1]] = omit_pairs[row[1]] + 1
+        if row[0] not in omit_pairs:
+            omit_pairs[row[0]] = 1
+        if row[1] not in omit_pairs:
+            omit_pairs[row[1]] = 1
+        
         if count == 1000:
             break
-        ranked_pair.loc[index,'CCS'],stats_debug = ranked_stat(index,row,cls_counts,other_pair_tp_tn,other_sing_tp_tn,in_cls_count)
+        
+        ranked_pair.loc[index,'CCS'],stats_debug = ranked_stat(gene_1,gene_2,lead_gene,cls_counts,other_pair_tp_tn,other_sing_tp_tn,in_cls_count)
         for key in stats_debug:
             ranked_pair.loc[index,'CCS_cluster_'+str(key)] = stats_debug[key]
-            
         count = count + 1
+        #print(count)
 
+    #print(ranked_pair)
+    #time.sleep(10000)
     ranked_pair.sort_values(by='CCS',ascending=False,inplace=True)
     #print(ranked_pair)
     ranked_pair['CCSrank'] = ranked_pair.reset_index().index + 1
     #print(ranked_pair)
+    #time.sleep(1000)
     ranked_pair['finalrank'] = ranked_pair[['initrank', 'CCSrank']].mean(axis=1)
     #print(ranked_pair)
     ranked_pair.sort_values(by='finalrank',ascending=True,inplace=True)
@@ -605,6 +870,8 @@ def ranker(pair,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in_cls_count):
     ranked_pair['rank'] = ranked_pair.reset_index().index + 1
     #print(ranked_pair)
     ranked_pair.drop('finalrank',axis=1,inplace=True)
+    #print(ranked_pair)
+    #time.sleep(100)
     omit_genes = {}
     count = 0
     #For debug ony, gives column w/ each cluster's CCS 
@@ -612,7 +879,7 @@ def ranker(pair,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in_cls_count):
         if count == 100:
             break
         if row[0] in omit_genes:
-            if omit_genes[row[0]] > 10:
+            if omit_genes[row[0]] >= 10:
                 ranked_pair.loc[index,'Plot'] = 0
             else:
                 ranked_pair.loc[index,'Plot'] = 1
@@ -623,8 +890,16 @@ def ranker(pair,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in_cls_count):
             ranked_pair.loc[index,'Plot'] = 1
             count = count + 1
     #print(ranked_pair)
+    pop_list = []
+    for key, value in omit_pairs.items():
+        if value <= 20:
+            pop_list.append(key)
+
+    for item in pop_list:
+        omit_pairs.pop(item)
+
     
-    return ranked_pair
+    return ranked_pair,omit_pairs
 
 
 def pair_tp_tn(gene_map, in_cls_count, pop_count, in_cls_product,
@@ -674,4 +949,207 @@ def pair_tp_tn(gene_map, in_cls_count, pop_count, in_cls_product,
         'TN': tn_result
     }, columns=['gene_1', 'gene_2', 'TP', 'TN'])
 
+    return output
+
+
+
+def trips_hg_debug(gene_map,in_cls_count,pop_count,trips_in_cls,trips_total,trips_indices,gene_1_mapped,gene_2_mapped):
+    print('start matrix search')
+    
+    #should do absolutely nothing at each entry of matrix
+    def func(in_cls_value,total_value,pop_count,in_cls_count,loc):
+        if in_cls_value/in_cls_count < .05:
+            pass
+        else:
+            pval = ss.hypergeom.sf(in_cls_value,pop_count,in_cls_count,total_value,loc)
+        return pval
+    vhg = np.vectorize(func)
+    loc = 1
+    hg_result = vhg(
+        trips_in_cls[trips_indices],
+        trips_total[trips_indices],
+        pop_count,
+        in_cls_count,
+        loc
+        )
+        
+    return hg_result
+
+def trips_hg(gene_map,in_cls_count,pop_count,trips_in_cls,trips_total,trips_indices,gene_1_mapped,gene_2_mapped,gene_3_mapped):
+    '''
+    Altered version of pair_hg to do trips w/ the trips expression matrices
+    See pair_hg for general var descriptions
+    See combination product for full trips discussion
+    Uses same vectorization scheme as pair, but has new rectangular indices and 
+    third gene output. 'pair_indices' just gives us a list from 0 to however many values
+    there are, this is then checked against the gene maps which contain all the mapping
+    info for genes 1 & 2 (this setup plays nicely with the dataframe construction, the gene map
+    values are already in the correct order). We then trim the matrix, disallowing any values 
+    that have repeat genes (e.g. ACC -> no good) and also removing repeat triplets
+    (e.g. ABC -> good , BAC -> no good if ABC already exists). This is SLOW, but more or less
+    unavoidable. We didn't need to do this in the pair case b/c we knew ahead of time that all
+    valid and unique values would be in the upper triangle, that doesn't hold in this case.
+    '''
+
+    '''
+
+    #replacing hypergeom, only looks at values that are above 15% TP
+    def func(in_cls_value,pop_count,in_cls_count,total_value,loc):
+        if in_cls_value/in_cls_count < .25:
+            pval = None
+        else:
+            pval = -math.log(ss.hypergeom.sf(in_cls_value,pop_count,in_cls_count,total_value,loc),10)
+        return pval
+    vhg = np.vectorize(func, excluded = [1,2,4], otypes=[np.float])
+    hg_result = vhg(
+        trips_in_cls[trips_indices],
+        pop_count,
+        in_cls_count,
+        trips_total[trips_indices],
+        loc = 1
+        )
+
+    '''
+    vhg = np.vectorize(ss.hypergeom.sf, excluded=[1, 2, 4], otypes=[np.float])
+
+    hg_result = vhg(
+        trips_in_cls[trips_indices],
+        pop_count,
+        in_cls_count,
+        trips_total[trips_indices],
+        loc=1
+    )
+    #print(trips_in_cls)
+    #print(trips_total)
+    #print('hg')
+    #print(hg_result)
+    #time.sleep(1000)
+    print('Finished HG testing')
+    pair_indices = []
+    gene_count = int(len(gene_map))
+    val_count =int( len(gene_1_mapped))
+    #print('GENE COUNT: ' + str(gene_count))
+    #print('Number of vals: ' + str(val_count))
+    #print('Results number: ' + str(len(hg_result)))
+    for x in range(val_count):
+        pair_indices.append(x)
+    pair_indices = np.array(pair_indices)
+    #print(pair_indices)
+    #time.sleep(1000)
+    #print(len(gene_1_mapped))
+    #print(len(gene_2_mapped))
+    #print(pair_indices)
+    #print(trips_indices)
+    #print(trips_indices[1])
+    #print(len(hg_result))
+    #print(gene_map[trips_indices[1]])
+    output = pd.DataFrame({
+        'gene_1': gene_1_mapped[pair_indices],
+        'gene_2': gene_2_mapped[pair_indices],
+        'gene_3': gene_3_mapped[pair_indices],
+        'HG_stat': hg_result
+    }, columns=['gene_1', 'gene_2', 'gene_3', 'HG_stat'])
+    #print(output)
+    output = output.sort_values(by='HG_stat', ascending=True)
+    #going to try an abbreviated trim process:
+    #trim until we get a few thousand hits
+
+    #trims off values w/ repeating genes (e.g. ACC)
+    #output = output.drop(output[(output.gene_1==output.gene_2)|(output.gene_2==output.gene_3)|(output.gene_1==output.gene_3)].index)
+    #print(output)
+    #store unique trios in used_genes
+    #iteratively check against the list
+    used_genes = []
+    counter=0
+    for index, row in output.iterrows():
+        #row[0] = gene1
+        #row[1] = gene2
+        #row[2] = gene3
+        if counter == 10000:
+            break
+        if row[0]==row[1] or row[1]==row[2] or row[0]==row[2]:
+            output.drop([index],inplace=True)
+            continue
+        drop = 0
+        for gene_list in used_genes:
+            
+            if row[0] in gene_list and row[1] in gene_list and row[2] in gene_list:
+                output.drop([index],inplace=True)
+                drop = 1
+                break
+            else:
+                pass
+            if drop == 1:
+                continue
+            else:
+                used_genes.append([row[0],row[1],row[2]])
+        if drop == 1:
+            continue
+        else:
+            counter = counter+1
+            
+    #print(output)
+    #time.sleep(1000)
+    return output
+
+def trips_tp_tn(gene_map, in_cls_count, pop_count,trips_in_cls,trips_total,trips_indices,gene_1_mapped,gene_2_mapped,gene_3_mapped):
+    '''
+    Altered version of pair_tp_tn to do trips w/ the trips expression matrices
+    See pair_tp_tn for general var descriptions
+    '''
+
+    def tp(taken_in_cls):
+        return taken_in_cls / in_cls_count
+
+    def tn(taken_in_cls, taken_in_pop):
+        return (
+            ((pop_count - in_cls_count) - (taken_in_pop - taken_in_cls))
+            / (pop_count - in_cls_count)
+        )
+    tp_result = np.vectorize(tp)(trips_in_cls[trips_indices])
+    tn_result = np.vectorize(tn)(
+        trips_in_cls[trips_indices], trips_total[trips_indices]
+    )
+
+    #time.sleep(1000)
+    pair_indices = []
+    gene_count = int(len(gene_map))
+    val_count =int( ( (gene_count*(gene_count-1))/2 ) * gene_count)
+    for x in range(val_count):
+        pair_indices.append(x)
+    pair_indices = np.array(pair_indices)
+    #print(pair_indices)
+    #time.sleep(1000)
+    output = pd.DataFrame({
+        'gene_1': gene_1_mapped[pair_indices],
+        'gene_2': gene_2_mapped[pair_indices],
+        'gene_3': gene_3_mapped[pair_indices],
+        'TP': tp_result,
+        'TN': tn_result
+    }, columns=['gene_1', 'gene_2', 'gene_3', 'TP','TN'])
+    #print(output)
+    #trims off values w/ repeating genes (e.g. ACC)
+    output = output.drop(output[(output.gene_1==output.gene_2)|(output.gene_2==output.gene_3)|(output.gene_1==output.gene_3)].index)
+    #print(output)
+    #store unique trios in used_genes
+    #iteratively check against the list
+    used_genes = []
+    for index, row in output.iterrows():
+        #row[0] = gene1
+        #row[1] = gene2
+        #row[2] = gene3
+        drop = 0
+        for gene_list in used_genes:
+            
+            if row[0] in gene_list and row[1] in gene_list and row[2] in gene_list:
+                output.drop([index],inplace=True)
+                drop = 1
+                break
+            else:
+                pass
+        if drop == 1:
+            continue
+        else:
+            used_genes.append([row[0],row[1],row[2]])
+    #print(output)
     return output
