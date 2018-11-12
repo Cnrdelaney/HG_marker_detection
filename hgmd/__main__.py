@@ -49,6 +49,14 @@ def init_parser(parser):
         '-L', nargs='?', default=None,
         help="L argument for XL-mHG"
     )
+    parser.add_argument(
+        '-Abbrev', nargs='?',default=True,
+        help="Choose between abbreviated or full 3-gene computation"
+    )
+    parser.add_argument(
+        '-K', nargs='?',default=None,
+        help="K-gene combinations to include"
+    )
     return parser
 
 
@@ -88,7 +96,7 @@ def read_data(cls_path, tsne_path, marker_path, gene_path):
                     
     return (cls_ser, tsne, no_complement_marker_exp, gene_path)
 
-def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_path,pickle_path,cluster_number):
+def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_path,pickle_path,cluster_number,K,abbrev):
     #for cls in clusters:
     # To understand the flow of this section, read the print statements.
     start_cls_time = time.time()
@@ -113,15 +121,19 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
         .sort_values(by='HG_stat', ascending=True)
 
     ###########
-    #TRIPS EXPERIMENTAL
-    count = 0
-    trips_list=[]
-    for index,row in xlmhg.iterrows():
-        if count == 200:
-            break
-        else:
-            trips_list.append(row[0])
-            count = count + 1
+    if K == 3:
+        #TRIPS ABBREVIATED
+        if abbrev == True:
+            count = 0
+            trips_list=[]
+            for index,row in xlmhg.iterrows():
+                if count == 100:
+                    break
+                else:
+                    trips_list.append(row[0])
+                    count = count + 1
+            else:
+                trips_list = None
     ############
     
     print('Creating discrete expression matrix...')
@@ -139,14 +151,13 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
         in_cls_product, total_product, upper_tri_indices,
         cluster_exp_matrices, cls_counts
     ) = hgmd.pair_product(discrete_exp, cls_ser, cls, cluster_number)
+    if K == 3:
+        start_trips = time.time()
+        print('Finding Trips expression matrix...')
+        trips_in_cls,trips_total,trips_indices,gene_1_mapped,gene_2_mapped,gene_3_mapped = hgmd.combination_product(discrete_exp,cls_ser,cls,trips_list)
+        end_trips = time.time()
+        print(str(end_trips-start_trips) + ' seconds')
 
-
-    start_trips = time.time()
-    print('Finding Trips expression matrix...')
-    trips_in_cls,trips_total,trips_indices,gene_1_mapped,gene_2_mapped,gene_3_mapped = hgmd.combination_product(discrete_exp,cls_ser,cls,trips_list)
-    end_trips = time.time()
-    print(str(end_trips-start_trips) + ' seconds')
-    
     HG_start = time.time()
     print('Running hypergeometric test on pairs...')
     pair = hgmd.pair_hg(
@@ -163,17 +174,25 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
     pair_out_initial.to_csv(
     csv_path + '/cluster_' + str(cls) + '_pair_init_rank.csv'
     )
-    
-    HG_start = time.time()
-    print('Running hypergeometric test on trips DEBUG...')
-    trips = hgmd.trips_hg(
-        gene_map,in_cls_count,pop_count,
-        trips_in_cls,trips_total,trips_indices,
-        gene_1_mapped,gene_2_mapped,gene_3_mapped
-    )
-    #print(trips)
-    HG_end = time.time()
-    print(str(HG_end-HG_start) + ' seconds')
+
+    if K == 3:
+        HG_start = time.time()
+        print('Running hypergeometric test & TP/TN on trips...')
+        if abbrev == True:
+            trips = hgmd.trips_hg(
+                gene_map,in_cls_count,pop_count,
+                trips_in_cls,trips_total,trips_indices,
+                gene_1_mapped,gene_2_mapped,gene_3_mapped
+                )
+        else:
+            trips = hgmd.trips_hg_full(
+                gene_map,in_cls_count,pop_count,
+                trips_in_cls,trips_total,trips_indices,
+                gene_1_mapped,gene_2_mapped,gene_3_mapped
+                )
+            #print(trips)
+            HG_end = time.time()
+            print(str(HG_end-HG_start) + ' seconds')
 
 
 
@@ -193,12 +212,6 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
         )
         other_pair_tp_tn[key] = new_pair_tp_tn
         other_pair_tp_tn[key].set_index(['gene_1','gene_2'],inplace=True)
-    #print('Finding simple true positives/negatives for trips...')
-    #trips_tp_tn = hgmd.trips_tp_tn(
-    #    gene_map, in_cls_count, pop_count,
-    #    trips_in_cls,trips_total,trips_indices,
-    #    gene_1_mapped,gene_2_mapped
-    #)
     pair = pair\
         .merge(pair_tp_tn, on=['gene_1', 'gene_2'], how='left')
     pair_tp_tn.set_index(['gene_1','gene_2'],inplace=True)
@@ -244,13 +257,16 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
     )
     #Add trips data pages
     #does not currently do new rank scheme
-    trips_output = trips\
-        .sort_values(by='HG_stat', ascending=True)
-    #print(trips_output)
-    trips_output['rank'] = trips_output.reset_index().index + 1
-    trips_output.to_csv(
-        csv_path + '/cluster_' + str(cls) + '_trips.csv'
-    )
+    if K == 3:
+        trips_output = trips\
+          .sort_values(by='HG_stat', ascending=True)
+          #print(trips_output)
+        trips_output['rank'] = trips_output.reset_index().index + 1
+        trips_output.to_csv(
+            csv_path + '/cluster_' + str(cls) + '_trips.csv'
+            )
+    else:
+        trips_output = None
     print('Drawing plots...')
     plt.bar(list(histogram.keys()), histogram.values(), color='b')
     plt.savefig(vis_path + '/cluster_' + str(cls) + '_pair_histogram')
@@ -297,6 +313,8 @@ def main():
     )).parse_args()
     output_path = args.output_path
     C = args.C
+    K = args.K
+    Abbrev = args.Abbrev
     X = args.X
     L = args.L
     marker_file = args.marker
@@ -326,6 +344,13 @@ def main():
     if L is not None:
         L = int(L)
         print("Set L to " + str(L) + ".")
+    if K is not None:
+        K = int(K)
+    else:
+        K = 2
+    if K > 3:
+        K = 3
+        print('Only supports up to 3-gene combinations currently, setting K to 3')
     print("Reading data...")
     if gene_file is None:
         (cls_ser, tsne, no_complement_marker_exp, gene_path) = read_data(
@@ -371,7 +396,7 @@ def main():
         #clusters = [1 2 3 4 5 6] & cores = 4 --> new_clusters = [1 2 3 4], new_clusters = [5 6]
         for cls in new_clusters:
             p = multiprocessing.Process(target=process,
-                args=(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_path,pickle_path,cluster_number))
+                args=(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_path,pickle_path,cluster_number,K,Abbrev))
             jobs.append(p)
             p.start()
         p.join()

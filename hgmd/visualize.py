@@ -51,7 +51,10 @@ def make_plots(
     p_short = pair[pair['Plot']==1]
     #p_short = pair.iloc[:plot_pages]
     s_short = sing.iloc[:plot_pages]
-    t_short = trips.iloc[:plot_pages]
+    if trips == None:
+        pass
+    else:
+        t_short = trips.iloc[:plot_pages]
 
 
     vmt = np.vectorize(make_title)
@@ -72,38 +75,43 @@ def make_plots(
         ), p_short['gene_1'].values, p_short['gene_2'].values
     )
 
-    
-    vmt_2 = np.vectorize(make_trips_title)
-    t_plot_genes = zip(
-        zip(
-            vmt_2(
-                t_short['gene_1'], t_short['gene_2'], t_short['gene_3'],
-                t_short['rank'], t_short['gene_1'].map(cutoff)
-            ), vmt_2(
-                t_short['gene_1'], np.nan, np.nan,
-                t_short['gene_1'].map(rank),
-                t_short['gene_1'].map(cutoff)
-            ), vmt_2(
-                t_short['gene_2'], np.nan, np.nan,
-                t_short['gene_2'].map(rank),
-                t_short['gene_2'].map(cutoff)
-            ), vmt_2(
-                t_short['gene_3'], np.nan, np.nan,
-                t_short['gene_3'].map(rank),
-                t_short['gene_3'].map(cutoff)
+    if trips == None:
+        pass
+    else:
+        vmt_2 = np.vectorize(make_trips_title)
+        t_plot_genes = zip(
+            zip(
+                vmt_2(
+                    t_short['gene_1'], t_short['gene_2'], t_short['gene_3'],
+                    t_short['rank'], t_short['gene_1'].map(cutoff)
+                    ), vmt_2(
+                        t_short['gene_1'], np.nan, np.nan,
+                        t_short['gene_1'].map(rank),
+                        t_short['gene_1'].map(cutoff)
+                        ), vmt_2(
+                            t_short['gene_2'], np.nan, np.nan,
+                            t_short['gene_2'].map(rank),
+                            t_short['gene_2'].map(cutoff)
+                            ), vmt_2(
+                                t_short['gene_3'], np.nan, np.nan,
+                                t_short['gene_3'].map(rank),
+                                t_short['gene_3'].map(cutoff)
+                                )
+                ), t_short['gene_1'].values, t_short['gene_2'].values, t_short['gene_3'].values
             )
-        ), t_short['gene_1'].values, t_short['gene_2'].values, t_short['gene_3'].values
-    )
     
 
     print("Drawing discrete plots for pairs...")
     make_discrete_plots(
         tsne, discrete_exp, d_plot_genes, discrete_path, 2
     )
-    print("Drawing discrete plots for trips...")
-    make_discrete_plots(
-        tsne, discrete_exp, t_plot_genes, trips_path, 3
-    )
+    if trips == None:
+        pass
+    else:
+        print("Drawing discrete plots for trips...")
+        make_discrete_plots(
+            tsne, discrete_exp, t_plot_genes, trips_path, 3
+            )
     
 
     

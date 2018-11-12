@@ -443,6 +443,8 @@ def combination_product(discrete_exp,c_list,coi,trips_list):
         trips_matrix = np.asarray(trips_matrix_list)
         #print(trips_matrix.shape)
         #print(matrix.shape)
+        #print(trips_matrix.shape)
+        #print(matrix.shape)
         trips_product = np.matmul(trips_matrix,matrix)
         Bth = time.time()
         print(str(Bth-Ath) + ' mult seconds')
@@ -486,16 +488,17 @@ def combination_product(discrete_exp,c_list,coi,trips_list):
     ###############
     #Experimental Section
     #print(trips_list)
-    for column in discrete_exp:
-        #print(column)
-        if str(column) in trips_list:
-            continue
-        else:
-            discrete_exp.drop(column, axis=1,inplace=True)
+    if trips_list == None:
+        pass
+    else:
+        for column in discrete_exp:
+            #print(column)
+            if str(column) in trips_list:
+                continue
+            else:
+                discrete_exp.drop(column, axis=1,inplace=True)
     ################
     
-    in_cls_matrix = discrete_exp[c_list == coi].values
-    total_matrix = discrete_exp.values
     
     start_time = time.time()
     in_cls_matrix = discrete_exp[c_list == coi].values
@@ -507,7 +510,7 @@ def combination_product(discrete_exp,c_list,coi,trips_list):
     #time.sleep(100)
     first = time.time()
     trips_in_cls_product = trips_matrix_gen(in_cls_matrix)
-    trips_total_product = trips_matrix_gen(in_cls_matrix)
+    trips_total_product = trips_matrix_gen(total_matrix)
     '''
     trips_matrix_A,trips_matrix_B,trips_matrix_C,trips_matrix_D = trips_matrix_gen(in_cls_matrix)
     trips_in_cls_product_1 = np.append(trips_matrix_A,trips_matrix_B,axis=0)
@@ -774,12 +777,12 @@ def ranker(pair,xlmhg,sing_tp_tn,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in
             N = cls_counts[clstrs]
             value =  ( TN_after - TN_before ) / N 
             stats.append(value)
-            stats_debug[clstrs] = value
+            #stats_debug[clstrs] = value
         stat1 = sum(stats)
         #stats.remove(stat1)
         #stat2 = max(stats)
         #stat= stat1+stat2
-        return stat1,stats_debug
+        return stat1
     xlmhg_cop = xlmhg.copy()
     xlmhg_cop = xlmhg_cop.set_index('gene_1')
     ranked_pair = pair.copy()
@@ -850,9 +853,11 @@ def ranker(pair,xlmhg,sing_tp_tn,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in
         if count == 1000:
             break
         
-        ranked_pair.loc[index,'CCS'],stats_debug = ranked_stat(gene_1,gene_2,lead_gene,cls_counts,other_pair_tp_tn,other_sing_tp_tn,in_cls_count)
+        ranked_pair.loc[index,'CCS'] = ranked_stat(gene_1,gene_2,lead_gene,cls_counts,other_pair_tp_tn,other_sing_tp_tn,in_cls_count)
+        '''
         for key in stats_debug:
             ranked_pair.loc[index,'CCS_cluster_'+str(key)] = stats_debug[key]
+        '''
         count = count + 1
         #print(count)
 
@@ -874,7 +879,6 @@ def ranker(pair,xlmhg,sing_tp_tn,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in
     #time.sleep(100)
     omit_genes = {}
     count = 0
-    #For debug ony, gives column w/ each cluster's CCS 
     for index,row in ranked_pair.iterrows():
         if count == 100:
             break
@@ -1010,8 +1014,23 @@ def trips_hg(gene_map,in_cls_count,pop_count,trips_in_cls,trips_total,trips_indi
         )
 
     '''
+
+    def tp(taken_in_cls):
+        return taken_in_cls / in_cls_count
+
+    def tn(taken_in_cls, taken_in_pop):
+        return (
+            ((pop_count - in_cls_count) - (taken_in_pop - taken_in_cls))
+            / (pop_count - in_cls_count)
+        )
+    tp_result = np.vectorize(tp)(trips_in_cls[trips_indices])
+    tn_result = np.vectorize(tn)(
+        trips_in_cls[trips_indices], trips_total[trips_indices]
+    )
+    
     vhg = np.vectorize(ss.hypergeom.sf, excluded=[1, 2, 4], otypes=[np.float])
 
+    
     hg_result = vhg(
         trips_in_cls[trips_indices],
         pop_count,
@@ -1019,12 +1038,14 @@ def trips_hg(gene_map,in_cls_count,pop_count,trips_in_cls,trips_total,trips_indi
         trips_total[trips_indices],
         loc=1
     )
+
+    #print(hg_result)
     #print(trips_in_cls)
     #print(trips_total)
     #print('hg')
     #print(hg_result)
     #time.sleep(1000)
-    print('Finished HG testing')
+    print('HG + TP/TN done')
     pair_indices = []
     gene_count = int(len(gene_map))
     val_count =int( len(gene_1_mapped))
@@ -1047,10 +1068,111 @@ def trips_hg(gene_map,in_cls_count,pop_count,trips_in_cls,trips_total,trips_indi
         'gene_1': gene_1_mapped[pair_indices],
         'gene_2': gene_2_mapped[pair_indices],
         'gene_3': gene_3_mapped[pair_indices],
-        'HG_stat': hg_result
-    }, columns=['gene_1', 'gene_2', 'gene_3', 'HG_stat'])
+        'HG_stat': hg_result,
+        'TP' : tp_result,
+        'TN': tn_result
+    }, columns=['gene_1', 'gene_2', 'gene_3', 'HG_stat','TP','TN'])
+    #print(output)
     #print(output)
     output = output.sort_values(by='HG_stat', ascending=True)
+    #print(output)
+    #time.sleep(10000)
+    #going to try an abbreviated trim process:
+    #trim until we get a few thousand hits
+
+    #trims off values w/ repeating genes (e.g. ACC)
+    #output = output.drop(output[(output.gene_1==output.gene_2)|(output.gene_2==output.gene_3)|(output.gene_1==output.gene_3)].index)
+    #print(output)
+    #store unique trios in used_genes
+    #iteratively check against the list
+    used_genes = []
+    counter=0
+    prev_stat = 0
+    for index, row in output.iterrows():
+        #row[0] = gene1
+        #row[1] = gene2
+        #row[2] = gene3
+        if counter == 1000:
+            break
+        if row[-1] < .9:
+            output.drop([index],inplace=True)
+            continue
+        if row[0]==row[1] or row[1]==row[2] or row[0]==row[2]:
+            output.drop([index],inplace=True)
+            continue
+        if row[3] == prev_stat:
+            output.drop([index],inplace=True)
+            continue
+        else:
+            prev_stat = row[3]
+        counter = counter+1
+            
+    #print(output)
+    #time.sleep(1000)
+    return output
+
+def trips_hg_full(gene_map, in_cls_count, pop_count,trips_in_cls,trips_total,trips_indices,gene_1_mapped,gene_2_mapped,gene_3_mapped):
+
+    def tp(taken_in_cls):
+        return taken_in_cls / in_cls_count
+
+    def tn(taken_in_cls, taken_in_pop):
+        return (
+            ((pop_count - in_cls_count) - (taken_in_pop - taken_in_cls))
+            / (pop_count - in_cls_count)
+        )
+    tp_result = np.vectorize(tp)(trips_in_cls[trips_indices])
+    tn_result = np.vectorize(tn)(
+        trips_in_cls[trips_indices], trips_total[trips_indices]
+    )
+    
+    vhg = np.vectorize(ss.hypergeom.sf, excluded=[1, 2, 4], otypes=[np.float])
+
+    
+    hg_result = vhg(
+        trips_in_cls[trips_indices],
+        pop_count,
+        in_cls_count,
+        trips_total[trips_indices],
+        loc=1
+    )
+
+    #print(hg_result)
+    #print(trips_in_cls)
+    #print(trips_total)
+    #print('hg')
+    #print(hg_result)
+    #time.sleep(1000)
+    print('HG + TP/TN done')
+    pair_indices = []
+    gene_count = int(len(gene_map))
+    val_count =int( len(gene_1_mapped))
+    #print('GENE COUNT: ' + str(gene_count))
+    #print('Number of vals: ' + str(val_count))
+    #print('Results number: ' + str(len(hg_result)))
+    for x in range(val_count):
+        pair_indices.append(x)
+    pair_indices = np.array(pair_indices)
+    #print(pair_indices)
+    #time.sleep(1000)
+    #print(len(gene_1_mapped))
+    #print(len(gene_2_mapped))
+    #print(pair_indices)
+    #print(trips_indices)
+    #print(trips_indices[1])
+    #print(len(hg_result))
+    #print(gene_map[trips_indices[1]])
+    output = pd.DataFrame({
+        'gene_1': gene_1_mapped[pair_indices],
+        'gene_2': gene_2_mapped[pair_indices],
+        'gene_3': gene_3_mapped[pair_indices],
+        'HG_stat': hg_result,
+        'TP' : tp_result,
+        'TN': tn_result
+    }, columns=['gene_1', 'gene_2', 'gene_3', 'HG_stat','TP','TN'])
+    #print(output)
+    output = output.sort_values(by='HG_stat', ascending=True)
+    #time.sleep(10000)
     #going to try an abbreviated trim process:
     #trim until we get a few thousand hits
 
@@ -1065,8 +1187,6 @@ def trips_hg(gene_map,in_cls_count,pop_count,trips_in_cls,trips_total,trips_indi
         #row[0] = gene1
         #row[1] = gene2
         #row[2] = gene3
-        if counter == 10000:
-            break
         if row[0]==row[1] or row[1]==row[2] or row[0]==row[2]:
             output.drop([index],inplace=True)
             continue
@@ -1090,66 +1210,4 @@ def trips_hg(gene_map,in_cls_count,pop_count,trips_in_cls,trips_total,trips_indi
             
     #print(output)
     #time.sleep(1000)
-    return output
-
-def trips_tp_tn(gene_map, in_cls_count, pop_count,trips_in_cls,trips_total,trips_indices,gene_1_mapped,gene_2_mapped,gene_3_mapped):
-    '''
-    Altered version of pair_tp_tn to do trips w/ the trips expression matrices
-    See pair_tp_tn for general var descriptions
-    '''
-
-    def tp(taken_in_cls):
-        return taken_in_cls / in_cls_count
-
-    def tn(taken_in_cls, taken_in_pop):
-        return (
-            ((pop_count - in_cls_count) - (taken_in_pop - taken_in_cls))
-            / (pop_count - in_cls_count)
-        )
-    tp_result = np.vectorize(tp)(trips_in_cls[trips_indices])
-    tn_result = np.vectorize(tn)(
-        trips_in_cls[trips_indices], trips_total[trips_indices]
-    )
-
-    #time.sleep(1000)
-    pair_indices = []
-    gene_count = int(len(gene_map))
-    val_count =int( ( (gene_count*(gene_count-1))/2 ) * gene_count)
-    for x in range(val_count):
-        pair_indices.append(x)
-    pair_indices = np.array(pair_indices)
-    #print(pair_indices)
-    #time.sleep(1000)
-    output = pd.DataFrame({
-        'gene_1': gene_1_mapped[pair_indices],
-        'gene_2': gene_2_mapped[pair_indices],
-        'gene_3': gene_3_mapped[pair_indices],
-        'TP': tp_result,
-        'TN': tn_result
-    }, columns=['gene_1', 'gene_2', 'gene_3', 'TP','TN'])
-    #print(output)
-    #trims off values w/ repeating genes (e.g. ACC)
-    output = output.drop(output[(output.gene_1==output.gene_2)|(output.gene_2==output.gene_3)|(output.gene_1==output.gene_3)].index)
-    #print(output)
-    #store unique trios in used_genes
-    #iteratively check against the list
-    used_genes = []
-    for index, row in output.iterrows():
-        #row[0] = gene1
-        #row[1] = gene2
-        #row[2] = gene3
-        drop = 0
-        for gene_list in used_genes:
-            
-            if row[0] in gene_list and row[1] in gene_list and row[2] in gene_list:
-                output.drop([index],inplace=True)
-                drop = 1
-                break
-            else:
-                pass
-        if drop == 1:
-            continue
-        else:
-            used_genes.append([row[0],row[1],row[2]])
-    #print(output)
     return output
