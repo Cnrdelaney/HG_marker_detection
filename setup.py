@@ -5,9 +5,9 @@ def read(filename):
     return open(os.path.join(os.path.dirname(__file__), filename)).read()
 
 setup(
-    name = 'HG-Marker-Detection',
-    version = '1.1.0',
-    long_description=read('README'),
+    name = 'HGMarkerDetection',
+    version = '1.1.1',
+    long_description=read('README.md'),
     packages = ['hgmd'],
     install_requires=[
         'atomicwrites==1.1.5' ,

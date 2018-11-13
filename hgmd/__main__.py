@@ -101,6 +101,7 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
     # To understand the flow of this section, read the print statements.
     start_cls_time = time.time()
     print('########\n# Processing cluster ' + str(cls) + '...\n########')
+    print(str(K) + ' gene combinations')
     print('Running t test on singletons...')
     t_test = hgmd.batch_t(marker_exp, cls_ser, cls)
     print('Running XL-mHG on singletons...')
