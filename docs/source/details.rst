@@ -93,9 +93,9 @@ In this way, COMET finds the **k** and **M** parameters for the hypergeometric t
 3+ gene combinations
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-Combinations of 3 or more genes are currently unimplemented in COMET. However, the hypergeometric parameters for 3+ gene combinations can be found by first considering a 2-gene subset of the combination. Take this 2-gene subset's discrete expression matrix (i.e. the matrix with cells as columns and gene pairs as rows, with value 1 for a cell expressing both genes in the pair, and 0 otherwise), and multiply it by the transpose of the single-gene discrete expression matrix.
+Combinations of 3 genes is currently implemented and turned on using the -K option. Due to the currnet computational expense, it can be run in full (if a cluster is available) or on lesser hardware with an abbreviated search space. The main bottleneck is matrix multiplication on computers with smaller memory loads. In the future, we will be implementing 4-gene combinations as well as optimizing and improving the 3-gene approach.
 
-This yields a matrix where each element is the number of cells which express the 3-gene combination correspond to its location's gene pair and single gene; using this method, then, **k** and **M** can again be found.
+For the existing 3-gene combinations, we construct an ~N^2 x Cells matrix containing genes A&B, then multiply by another N x Cells matrix containing gene C. This gives us an expression count matrix for the 3 gene combinations (large) and is then trimmed down to disclude gene combinations such as AAA and AAB where there are gene repeats.
 
 6. Run hypergeometric test on pairs using counts.
 ----------------------------------------------------
@@ -134,10 +134,10 @@ The columns of the singleton statistical data are:
 * ``t_pval``: the t-test p significance value corresponding to the test statistic.
 * ``TP``: the true positive rate.
 * ``TN``: the true negative rate.
-* ``rank``: sequential ranking based on ``HG_stat``, where lower ``HG_stat`` is better ranking. No two genes are ranked the same; those with identical hypergeometric statistic values are ranked arbitrarily relative to one another.
-
-The columns of the combination statistical data are the same as those of the singleton data with some exceptions:
-
+* ``init rank``: sequential ranking based on ``HG_stat``, where lower ``HG_stat`` is better ranking. No two genes are ranked the same; those with identical hypergeometric statistic values are ranked arbitrarily relative to one another.
+* ``CCS``: Cluster Clear Score. This gives us a statistic for the clearing out of other clusters with the addition of the second gene in comparison with the single gene case. The 'lead gene' is whichever of the pair has the smallest p-value, then we compute weighted True Negative deltas across the other clusters for the lead gene and the pair. This is only computed for a certain number of the top performing 'init rank' gene combinations.
+* ``rank``: Final rank. Takes the average of the the init rank and the CCS to determine which gene combinations are the best performing in both tests.
+* ``Plot``: Determines whether a gene is plotted (1) or not (0). The purpose is to only graph the top ten of a given gene appearance to avoid very well performing genes from taking over the entire results page.
 * ``gene`` is replaced by ``gene_1`` and ``gene_2`` (combinations of 3+ genes are unimplemented as of yet).
 * ``mHG_pval``, ``mHG_cutoff_index``, ``mHG_cutoff_value``, ``t_stat``, and ``t_pval`` are omitted, since they are irrelevant to non-singletons.
 
@@ -153,5 +153,6 @@ The PDF files are:
 * ``(cluster)_TP_TN.pdf``: plots true positive/negative rates of each gene.
 * ``(cluster)_singleton_combined.pdf``: same as the ``combined`` plot, but includes only singletons.
 * ``(cluster)_singleton_TP_TN.pdf``: same as the ``TP_TN`` plot, but includes only singletons.
-
+* ``(cluster)_discrete_trips.pdf``: compares discrete expression of a gene combination with that of its components, but there are three.
+* ``(cluster)_pair_histogram.pdf``: gives a bar graph of the top appearing genes in the pairs. Should give a good idea of the landscape of the best performing pairs.
 .. toctree::
