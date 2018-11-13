@@ -72,19 +72,26 @@ Following is an example of COMET usage and output on the command line:
 
 Following are examples of COMET output:
 
-|pair_csv| *CSV output*
+*CSV output*
+|pair_csv|
 
-|sing_csv| *Singleton-only CSV output*
+*Singleton-only CSV output*
+|sing_csv|
 
-|combined| *Combined continuous/discrete plots*
+*Combined continuous/discrete plots*
+|combined| 
 
-|discrete| *Discrete plots comparing combinations/singletons*
+*Discrete plots comparing combinations/singletons*
+|discrete|
 
-|sing_cmb| *Singleton-only combined plots*
+*Singleton-only combined plots*
+|sing_cmb| 
 
-|TPTN| *True positive/negative plot*
+*True positive/negative plot*
+|TPTN| 
 
-|sing_TPTN| *Singleton-only TP/TN plot*
+*Singleton-only TP/TN plot*
+|sing_TPTN| 
 
 
 

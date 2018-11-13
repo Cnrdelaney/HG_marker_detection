@@ -18,13 +18,7 @@ The easiest way to install the package is to simply run in the terminal:
    $ pip install HGMarkerDetection
 
 This will auto-download the depencencies necessary for running the
-tool. If you prefer to download the source code directly, you can clone the COMET source from our Github_, navigate to the cloned directory, then install it using Python's pip tool with the following three respective commands:
-
-.. code-block:: console
-
-   $ git clone https://github.com/Cnrdelaney/HG_marker_detection.git
-   $ cd HG_marker_detection/
-   $ pip install .
+tool. If you prefer to download the source code directly, you can clone the COMET source from our Github_, navigate to the cloned directory, then install it using Python.
 
 Now, run COMET on your data. Give the files of your data as the first
 three arguments and your desired output directory as your second argument.

@@ -8,7 +8,9 @@
 Input formatting
 -----------------
 
-Before you use COMET with gene expression data, your data should be formatted into 3 files:
+Before you use COMET with gene expression data, your data should be
+formatted into 3 files as shown below. Once the CSV's look good,
+simply rename the extension to '.txt'.
 
 * ``markers.txt``: a table in CSV format in a TXT file. The first row
   of the table lists gene names (all caps), while the first column
