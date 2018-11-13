@@ -1,7 +1,7 @@
-hgmd.hgmd
+hgmd.visualize
 ================
 
-.. automodule:: hgmd.hgmd
+.. automodule:: hgmd.visualize
     :members:
 
 .. toctree::

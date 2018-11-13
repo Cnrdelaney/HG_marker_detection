@@ -1,64 +1,34 @@
-Quickstart
-==================================
+.. _Github: https://github.com/aaronyaosmith/HG_marker_detection
 
+.. _Python: https://www.python.org/downloads/
 
-Starting up the HGMD tool out of the box is a very straightforward
-process, the following information should get you started quickly.
+.. _website: http://www.cometsc.com/login
 
+Installation/Quickstart
+========================
 
-Install:
----------
+To skip installation on your own machine and run COMET on your data on COMET's servers, check out our website_!
 
-First, check your version of Python. HGMD currently supports 3.5.X and
-3.6.X only.
+To install COMET's Python implementation on your own machine, you should first have Python_ version 3 installed.
 
+Once that is done, clone the COMET source from our Github_, navigate to the cloned directory, then install it using Python's pip tool with the following three respective commands:
 
-To begin, install the package through pip:
+.. code-block:: console
 
-   ``pip install HG-Marker-Detection``
+   $ git clone https://github.com/aaronyaosmith/HG_marker_detection.git
+   $ cd HG_marker_detection/
+   $ pip install .
 
-This will automatically install all dependencies necessary for the
-tool, so it is always recommended to use a virtual environment to
-avoid dependency conflicts.
+Now, run COMET on your data. Give the directory where your data is located as the first argument, and your desired output directory as your second argument.
 
-Usage:
-----------
+In this alpha stage of COMET's development, your data must be formatted into three files in your input directory: 'markers.txt', 'cluster.txt', and 'tsne.txt'. See the :doc:`Manual<manual>` for more information.
 
-Once installed, the terminal command to call is structured as follows:
+In this example, we have our data located in ``input/``. ``output/`` is the directory where COMET's output will be stored.
 
-   ``hgmd marker_file tsne_file cluster_file -g gene_file output/``
+.. code-block:: console
+		
+   $ hgmd input/ output/
 
-The optional arguments '-g' and '-C' are explained in the following
-section, but for a basic run of the tool they are unnecessary. The
-only necessary inputs are the marker file (expression matrix), the
-tsne file (tsne plot/coordinates), the cluster file (cluster
-plot/coordinates), and the output folder where your results will be
-fed. Currently, the tool will only accept CSV or TXT files which MUST
-be comma delimited. You MUST specify an output folder, so the easiest
-thing to do is to make a new empty directory:
+After this command is entered, COMET will run in the terminal, processing your data. See :doc:`Examples<examples>` for details on what this should look like.
 
-(on mac) ``mkdir hgmd_out``
-
-
-Options:
-------------
-
-   
--g *gene_file*
-
-   This optional statement is for using your own list of genes to be
-   considered during the tests. They will be cross-checked with your
-   expression matrix and only genes found in both files will be used.
-   If not specified,the tool defaults to our own curated list of genes
-   which encode surface proteins.
-
--C *integer*
-   
-   This optional statement allows the user to run multiple clusters in
-   parallel, assuming they are all independent calculations. The integer
-   specified will multi-process the python code to take that many
-   clusters at once. This will show odd print statements in the terminal
-   as there are many being printed at once, but the speedup of this
-   option can be rather substantial if your computer is up for the
-   challenge. In general, a good rule of thumb is to have this number
-   reflect the number of CPU's you have available.
+.. toctree::

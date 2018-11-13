@@ -1,31 +1,28 @@
-<<<<<<< HEAD
-.. HGMD documentation master file, created by
-   sphinx-quickstart on Mon Sep 24 10:32:24 2018.
-   You can adapt this file completely to your liking, but it should at least
-   contain the root `toctree` directive.
+.. title:: Home
 
-HG-Marker-Detection tool & COMET Interface information
-=======================================
+.. _Github: https://github.com/aaronyaosmith/HG_marker_detection
 
-Contents:
+.. _website: http://www.cometsc.com/login
 
+.. |comet| image:: _static/COMET.png
+   :width: 25%
 
+|comet|
+
+**COMET: Identifying candidate marker panels from single-cell transcriptomic data.**
+
+Official documentation for COMET version |release|.
+
+Start with :doc:`Quickstart<quickstart>`, or jump right into the :doc:`User Manual<manual>`.
+
+Use the tool on COMET's website_!
+
+Find us on Github_!
 
 .. toctree::
    :maxdepth: 2
+   :hidden:
 
-   Quickstart
-	   
-
-   ToolDescription
-
-   Output
-=======
-Welcome to COMET's documentation!
-=====================================
-This is going to become the future documentation of COMET.
-
-.. toctree::
-     :maxdepth: 2
-     :caption: Contents:
->>>>>>> caafb05e5fc4858f6954dc62b779d1ce4f00e045
+   quickstart
+   manual
+   api
