@@ -1,25 +1,14 @@
-# HG_marker_detection
+# COMET: Identifying candidate marker panels from single-cell transcriptomic data.
 
-<<<<<<< HEAD
+[![Documentation Status](https://readthedocs.org/projects/hgmd/badge/?version=latest)](https://hgmd.readthedocs.io/en/latest/?badge=latest)
 
+## Installation and Usage
+  Check out the [COMET documentation](https://hgmd.readthedocs.io/en/latest/)!
 
-Tool information
-===================
+## About us
 
+  Maintained & Actively Developed by Conor Delaney (cdelaney@bcb.dfci.harvard.edu).
 
-
-Find our complete documentation on READTHEDOCS:
-
-https://hg-marker-detection.readthedocs.io/en/latest/index.html
-   
-
-Created by Aaron Yao-Smith (aty25@cornell.edu)
-
-Maintained by Conor Delaney (cdelaney@bcb.dfci.harvard.edu)
-=======
-COMET: Identifying candidate marker panels from single-cell transcriptomic data.
-
-Created by Aaron Yao-Smith (aty25@cornell.edu).
-
-Maintained by Conor Delaney (cdelaney@bcb.dfci.harvard.edu)
->>>>>>> caafb05e5fc4858f6954dc62b779d1ce4f00e045
+  Prototyped by Aaron Yao-Smith (aty25@cornell.edu).
+  
+  Uses the [XL-mHG](https://github.com/flo-compbio/xlmhg) test, created by Florian Wagner.
