@@ -35,7 +35,7 @@ In this example, we have our data located in the current directory. ``output/`` 
 
    $ hgmd [-h] [-g [G]] [-C [C]] [-X [X]] [-L [L]] [-Abbrev [ABBREV]]
             [-K [K]]
-After this command is entered, COMET will run in the terminal, processing your data. See :doc:`Output<Output>` for details on what this should look like.
+After this command is entered, COMET will run in the terminal, processing your data. See :doc:`Examples<examples>` for details on what this should look like.
 
 The optional statements are described as follows:
 
@@ -80,20 +80,5 @@ The optional statements are described as follows:
     defaults to 2, can be at most 3 (for the time being). Should only
     be either 2 or 3. Will be extended to 4 gene combinations in the
     future.
-
-
-
-Common Installation Problems:
-========================
-Matplotlib failing -> Sometimes the bare installation of matplotlib
-can cause problems with the 'backend' setting. Maneuvering to the file
-'matplotlibrc' in the site packages and changing the backend variable
-to 'Agg' will fix this problem. Unrelated to COMET but common issue we
-ran into.
-
-General python -> Most python problems are fixed by installing
-virtualenv and setting up a virtual environment for your project with
-python 3.6.X . Check out https://docs.python-guide.org/dev/virtualenvs/
-
-
+    
 .. toctree::
