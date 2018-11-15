@@ -76,7 +76,7 @@ def read_data(cls_path, tsne_path, marker_path, gene_path):
     #if this is being a bottleneck. Would require unboxing pd.read_csv though.
     no_complement_marker_exp = pd.read_csv(
         marker_path, index_col=0
-        ).rename_axis('cell')
+        ).rename_axis('cell',axis=1)
     #gene list filtering
     #print(no_complement_marker_exp)
     no_complement_marker_exp = np.transpose(no_complement_marker_exp)
