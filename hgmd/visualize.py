@@ -42,6 +42,10 @@ def make_plots(
     #print(marker_exp)
     cutoff = sing['cutoff_val'].abs()
     rank = sing['rank']
+    TP_pair = pair['TP']
+    TN_pair = pair['TN']
+    TP_sing = sing['TP']
+    TN_sing = sing['TN']
     
     pair_sing_only = pair[pair['gene_2'].isnull()]
     sing_rank = pd.Series(
@@ -62,15 +66,18 @@ def make_plots(
         zip(
             vmt(
                 p_short['gene_1'], p_short['gene_2'],
-                p_short['rank'], p_short['gene_1'].map(cutoff)
+                p_short['rank'], p_short['gene_1'].map(cutoff),
+                p_short['TP'], p_short['TN']
             ), vmt(
                 p_short['gene_1'], np.nan,
                 p_short['gene_1'].map(rank),
-                p_short['gene_1'].map(cutoff)
+                p_short['gene_1'].map(cutoff),
+                p_short['gene_1'].map(TP_sing), p_short['gene_1'].map(TN_sing)
             ), vmt(
                 p_short['gene_2'], np.nan,
                 p_short['gene_2'].map(rank),
-                p_short['gene_2'].map(cutoff)
+                p_short['gene_2'].map(cutoff),
+                p_short['gene_2'].map(TP_sing), p_short['gene_2'].map(TN_sing)
             )
         ), p_short['gene_1'].values, p_short['gene_2'].values
     )
@@ -120,11 +127,15 @@ def make_plots(
             vmt(
                 p_short['gene_1'], np.nan,
                 p_short['gene_1'].map(rank),
-                p_short['gene_1'].map(cutoff)
+                p_short['gene_1'].map(cutoff),
+                p_short['gene_1'].map(TP_sing),
+                p_short['gene_1'].map(TN_sing)
             ), vmt(
                 p_short['gene_2'], np.nan,
                 p_short['gene_2'].map(rank),
-                p_short['gene_2'].map(cutoff)
+                p_short['gene_2'].map(cutoff),
+                p_short['gene_1'].map(TP_sing),
+                p_short['gene_1'].map(TN_sing)
             )
         ), p_short['gene_1'].values, p_short['gene_2'].values
     )
@@ -136,7 +147,8 @@ def make_plots(
         zip(
             vmt(
                 s_short.index, np.nan,
-                s_short['rank'], s_short['cutoff_val']
+                s_short['rank'], s_short['cutoff_val'],
+                s_short['TP'], s_short['TN']
             ), repeat(np.nan)
         ), s_short.index, repeat(np.nan)
     )
@@ -157,7 +169,7 @@ def make_plots(
     )
 
 
-def make_title(gene_1, gene_2, rank, cutoff_val):
+def make_title(gene_1, gene_2, rank, cutoff_val, TP, TN):
     """Makes a plot title for a gene or gene pair.
 
     Formatting: for pairs, 'rank $rank: $gene_1+$gene_2', and for singletons,
@@ -173,9 +185,9 @@ def make_title(gene_1, gene_2, rank, cutoff_val):
     """
 
     if pd.isna(gene_2):
-        return ("rank %.0f: %s %.3f" % (rank, gene_1, cutoff_val))
+        return ("rank %.0f: %s %.3f - TP:%.2f TN:%.2f" % (rank, gene_1, cutoff_val, TP, TN))
     else:
-        return ("rank %.0f: %s+%s" % (rank, gene_1, gene_2))
+        return ("rank %.0f: %s+%s - TP:%.2f TN:%.2f" % (rank, gene_1, gene_2, TP, TN))
 
 def make_trips_title(gene_1,gene_2,gene_3,rank,cutoff_val):
     
