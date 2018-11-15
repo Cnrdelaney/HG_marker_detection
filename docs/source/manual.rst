@@ -13,4 +13,4 @@ If you just want to run COMET on your data on COMET's servers, check out our web
    background
    details
    usage
-   examples
+   Output

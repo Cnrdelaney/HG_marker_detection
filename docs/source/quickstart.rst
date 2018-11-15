@@ -35,7 +35,7 @@ In this example, we have our data located in the current directory. ``output/`` 
 
    $ hgmd [-h] [-g [G]] [-C [C]] [-X [X]] [-L [L]] [-Abbrev [ABBREV]]
             [-K [K]]
-After this command is entered, COMET will run in the terminal, processing your data. See :doc:`Examples<examples>` for details on what this should look like.
+After this command is entered, COMET will run in the terminal, processing your data. See :doc:`Output<Output>` for details on what this should look like.
 
 The optional statements are described as follows:
 

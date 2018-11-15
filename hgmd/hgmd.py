@@ -795,6 +795,11 @@ def ranker(pair,xlmhg,sing_tp_tn,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in
     #ranked_pair['CCS'] = ranked_pair.apply(ranked_stat,axis=1,args=(cls_counts,other_pair_tp_tn,other_sing_tp_tn))
     omit_pairs = {}
     count = 1
+    #print(len(ranked_pair.index))
+    if len(ranked_pair.index) < 5000:
+        thresh = 100
+    else:
+        thresh = 1000
     for index,row in ranked_pair.iterrows():
         #print(row[0])
         #print(row[1])
@@ -851,7 +856,7 @@ def ranker(pair,xlmhg,sing_tp_tn,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in
         if row[1] not in omit_pairs:
             omit_pairs[row[1]] = 1
         
-        if count == 1000:
+        if count == thresh:
             break
         
         ranked_pair.loc[index,'CCS'] = ranked_stat(gene_1,gene_2,lead_gene,cls_counts,other_pair_tp_tn,other_sing_tp_tn,in_cls_count)
@@ -887,12 +892,18 @@ def ranker(pair,xlmhg,sing_tp_tn,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in
             if omit_genes[row[0]] >= 10:
                 ranked_pair.loc[index,'Plot'] = 0
             else:
-                ranked_pair.loc[index,'Plot'] = 1
+                if row[2] >= .05:
+                    ranked_pair.loc[index,'Plot'] = 0
+                else:
+                    ranked_pair.loc[index,'Plot'] = 1
                 omit_genes[row[0]] = omit_genes[row[0]]+1
                 count = count + 1
         else:
             omit_genes[row[0]] = 1
-            ranked_pair.loc[index,'Plot'] = 1
+            if row[2] >= .05:
+                ranked_pair.loc[index,'Plot'] = 0
+            else:
+                ranked_pair.loc[index,'Plot'] = 1
             count = count + 1
 
     #print(ranked_pair)

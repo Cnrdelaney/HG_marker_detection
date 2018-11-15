@@ -79,7 +79,7 @@ def read_data(cls_path, tsne_path, marker_path, gene_path):
         ).rename_axis('cell')
     #gene list filtering
     #print(no_complement_marker_exp)
-    #no_complement_marker_exp = np.transpose(no_complement_marker_exp)
+    no_complement_marker_exp = np.transpose(no_complement_marker_exp)
     #-------------#
     if gene_path is None:
         pass
@@ -239,6 +239,15 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
         .set_index('gene_1')\
         .sort_values(by='HG_stat', ascending=True)
     sing_output['rank'] = sing_output.reset_index().index + 1
+    count = 1
+    for index,row in sing_output.iterrows():
+        if count == 100:
+            break
+        if row[0] >= .05:
+            sing_output.loc[index,'Plot'] = 0
+        else:
+            sing_output.loc[index,'Plot'] = 1
+            count = count + 1
     sing_output.to_csv(
         csv_path + '/cluster_' + str(cls) + '_singleton.csv'
     )

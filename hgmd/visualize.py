@@ -50,7 +50,7 @@ def make_plots(
 
     p_short = pair[pair['Plot']==1]
     #p_short = pair.iloc[:plot_pages]
-    s_short = sing.iloc[:plot_pages]
+    s_short = sing[sing['Plot']==1]
     if trips == None:
         pass
     else:

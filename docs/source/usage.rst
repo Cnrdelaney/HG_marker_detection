@@ -13,9 +13,9 @@ formatted into 3 files as shown below. Once the CSV's look good,
 simply rename the extension to '.txt'.
 
 * ``markers.txt``: a table in CSV format in a TXT file. The first row
-  of the table lists gene names (all caps), while the first column
-  lists cell names (the cell at the very top left should be
-  blank). Each element in the rest of the table should contain a
+  of the table lists cell names, while the first column
+  lists genes (all caps) , the cell at the very top left should be
+  blank. Each element in the rest of the table should contain a
   numerical gene expression value, corresponding to the row/cell and
   column/gene of the element. Comma delimited only.
   
