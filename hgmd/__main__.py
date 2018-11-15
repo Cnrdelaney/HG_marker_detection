@@ -78,6 +78,8 @@ def read_data(cls_path, tsne_path, marker_path, gene_path):
         marker_path, index_col=0
         ).rename_axis('cell')
     #gene list filtering
+    #print(no_complement_marker_exp)
+    #no_complement_marker_exp = np.transpose(no_complement_marker_exp)
     #-------------#
     if gene_path is None:
         pass
@@ -269,8 +271,8 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
     else:
         trips_output = None
     print('Drawing plots...')
-    plt.bar(list(histogram.keys()), histogram.values(), color='b')
-    plt.savefig(vis_path + '/cluster_' + str(cls) + '_pair_histogram')
+    #plt.bar(list(histogram.keys()), histogram.values(), color='b')
+    #plt.savefig(vis_path + '/cluster_' + str(cls) + '_pair_histogram')
     vis.make_plots(
         pair=ranked_pair,
         sing=sing_output,

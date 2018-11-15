@@ -80,5 +80,20 @@ The optional statements are described as follows:
     defaults to 2, can be at most 3 (for the time being). Should only
     be either 2 or 3. Will be extended to 4 gene combinations in the
     future.
-    
+
+
+
+Common Installation Problems:
+========================
+Matplotlib failing -> Sometimes the bare installation of matplotlib
+can cause problems with the 'backend' setting. Maneuvering to the file
+'matplotlibrc' in the site packages and changing the backend variable
+to 'Agg' will fix this problem. Unrelated to COMET but common issue we
+ran into.
+
+General python -> Most python problems are fixed by installing
+virtualenv and setting up a virtual environment for your project with
+python 3.6.X . Check out https://docs.python-guide.org/dev/virtualenvs/
+
+
 .. toctree::

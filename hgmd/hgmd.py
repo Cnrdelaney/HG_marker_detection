@@ -118,7 +118,8 @@ def batch_t(marker_exp, c_list, coi):
         lambda col:
         ss.ttest_ind(
             col[c_list == coi],
-            col[c_list != coi]
+            col[c_list != coi],
+            equal_var=False
         )
     )
     output = pd.DataFrame()
@@ -893,6 +894,7 @@ def ranker(pair,xlmhg,sing_tp_tn,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in
             omit_genes[row[0]] = 1
             ranked_pair.loc[index,'Plot'] = 1
             count = count + 1
+
     #print(ranked_pair)
     pop_list = []
     for key, value in omit_pairs.items():
