@@ -24,6 +24,7 @@ Gives the single-gene marker list, ordered based on statistical relevance.
 
 
 **Visualizations**
+
 Shown below is t-sne format, but any two-dimensional visualization method is fine to use as input to COMET.
 
 
