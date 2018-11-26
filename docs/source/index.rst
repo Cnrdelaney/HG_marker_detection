@@ -11,7 +11,7 @@
 
 **COMET: Identifying candidate marker panels from single-cell transcriptomic data.**
 
-Official documentation for COMET version |release|.
+Official documentation for COMET Beta version.
 
 Start with :doc:`Quickstart<quickstart>`, or jump right into the :doc:`User Manual<manual>`.
 
