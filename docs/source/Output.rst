@@ -20,8 +20,11 @@ on ranking and the various statistics calculated for each pair.
 
 *Singleton-only CSV output* : 
 Gives the single-gene marker list, ordered based on statistical relevance.
-|sing_csv|                                                                                                                                                                                                                                                                                                                                                                                      
+|sing_csv|                                                                       
 
+
+**Visualizations**
+Shown below is t-sne format, but any two-dimensional visualization method is fine to use as input to COMET.
 
 
 
