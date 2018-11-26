@@ -23,14 +23,14 @@ for ease of view, but files should be given as plain text files.
   |markers|
   
 * ``tsne.txt``: The TSNE data stored as a TXT file (.txt). Consists of three columns separated by tabs, 
-the first column is cell name (the same as those in
+  the first column is cell name (the same as those in
   ``markers.txt``), the second is the tSNE_1 value for the cell, and
   the third is the tSNE_2 value for the cell. Tab delimited only.
   
   |tsne|
   
 * ``cluster.txt``: The cluster assignments for cells stored as a TXT file (.txt).
-The first column is cell name (consistent with
+  The first column is cell name (consistent with
   ``markers.txt`` and ``tsne.txt``) and the second is the cluster of
   which the cell is a member. Cell names should avoid using punctuation marks. Tab delimited only.
   
