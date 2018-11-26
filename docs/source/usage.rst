@@ -26,7 +26,7 @@ for ease of view, but files should be given as plain text files.
   the first column is cell name (the same as those in
   ``markers.txt``), the second is the t-SNE_1 value for the cell, and
   the third is the t-SNE_2 value for the cell. Tab delimited only. 
-THIS DOES NOT HAVE TO BE TSNE. Any 2-d visualization is fine (e.g. UMAP)
+**THIS DOES NOT HAVE TO BE TSNE. Any 2-d visualization is fine (e.g. UMAP)**
   
   |tsne|
   
