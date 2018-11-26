@@ -16,10 +16,10 @@ COMET iterates sequentially through all user-specified clusters, generating stat
 
 *First, continuous expression values are converted to discrete via the XL-mHG test. Then, genes are combined and their combinations tests via the hypergeometric test. Finally, these combinations are ranked, assessed, and plotted.*
 
-1. Read in data from CSV.
+1. Read in data from TXT.
 ------------------------------
 
-User-specified data is read in via CSV format (currently, requiring comma delimiters.) See :doc:`Usage<usage>` for details of the format of this data.
+User-specified data is read in via TXT format (currently, requiring tab delimiters.) See :doc:`Usage<usage>` for details of the format of this data.
 
 There are three components:
 
