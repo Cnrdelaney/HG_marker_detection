@@ -1,5 +1,5 @@
-.. |pair_csv| image:: _static/pair_csv_example.png
-.. |sing_csv| image:: _static/singleton_csv_example.png
+.. |pair_csv| image:: _static/pair_csv.png
+.. |sing_csv| image:: _static/sing_csv.png
 .. |combined| image:: _static/cluster_Spleen_1_combined-01.jpg
 .. |discrete| image:: _static/cluster_Spleen_1_discrete-01.jpg
 .. |sing_cmb| image:: _static/cluster_Spleen_1_singleton_combined-01.jpg
