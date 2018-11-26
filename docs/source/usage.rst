@@ -17,14 +17,14 @@ simply rename the extension to '.txt'.
   lists genes (all caps) , the cell at the very top left should be
   blank. Each element in the rest of the table should contain a
   numerical gene expression value, corresponding to the row/cell and
-  column/gene of the element. Comma delimited only.
+  column/gene of the element. Tab delimited only.
   
   |markers|
   
 * ``tsne.txt``: a table in CSV format, of three columns without column
   labels. The first column is cell name (the same as those in
   ``markers.txt``), the second is the tSNE_1 value for the cell, and
-  the third is the tSNE_2 value for the cell. Comma delimited only.
+  the third is the tSNE_2 value for the cell. Tab delimited only.
   
   |tsne|
   
@@ -32,13 +32,13 @@ simply rename the extension to '.txt'.
   column labels. The first column is cell name (consistent with
   ``markers.txt`` and ``tsne.txt``), and the second is the cluster of
   which the cell is a member. Cluster numbers should start from 1 and
-  Cluster names should avoid using punctuation marks. Comma delimited only.
+  Cluster names should avoid using punctuation marks. Tab delimited only.
   
   |cluster|
   
 
 * ``gene_list``: A list of genes to use for filtering in your
-  data. Should be comma delimited and in all caps.
+  data. Should be comma delimited.
 
 
 
