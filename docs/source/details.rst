@@ -25,7 +25,7 @@ There are three components:
 
 * Per-cell gene expression values. Each gene must be normalized over cells.
 * Cluster membership by cell.
-* Per-cell 2-D tSNE values, for plotting.
+* Per-cell 2-D t-SNE values, for plotting.
 
 In order to test 'complement' genes (i.e. expressed as the absence of a gene rather than the presence of a gene), COMET creates a new complement gene for each gene. These complement genes are treated exactly the same as normal genes, but their expression values are the negative of the expression values of their analogous gene. This allows COMET to find separate mHG cutoff values for genes and their complements.
 
@@ -125,7 +125,7 @@ For each cluster, COMET generates five PDF files containing visualizations of th
 
 The PDF files are:
 
-* ``(cluster)_combined.pdf``: compares discrete expression and continuous expression for each gene in a combination on a tSNE plot.
+* ``(cluster)_combined.pdf``: compares discrete expression and continuous expression for each gene in a combination on a t-SNE plot.
 * ``(cluster)_discrete.pdf``: compares discrete expression of a gene combination with that of its components.
 * ``(cluster)_TP_TN.pdf``: plots true positive/negative rates of each gene.
 * ``(cluster)_singleton_combined.pdf``: same as the ``combined`` plot, but includes only singletons.
