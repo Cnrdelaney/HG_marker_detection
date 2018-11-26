@@ -38,7 +38,8 @@ for ease of view, but files should be given as plain text files.
   
 
 * ``gene_list``: A list of genes to use for filtering in your
-  data. Should be comma delimited.
+  data. An optional addition, but when used COMET will only consider the genes submitted here.
+  By default COMET will use our own list of surface marking genes. Should be comma delimited.
 
 
 
