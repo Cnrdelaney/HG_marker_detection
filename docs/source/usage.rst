@@ -32,8 +32,7 @@ the first column is cell name (the same as those in
 * ``cluster.txt``: The cluster assignments for cells stored as a TXT file (.txt).
 The first column is cell name (consistent with
   ``markers.txt`` and ``tsne.txt``) and the second is the cluster of
-  which the cell is a member. Cluster numbers should start from 1 and
-  cell names should avoid using punctuation marks. Tab delimited only.
+  which the cell is a member. Cell names should avoid using punctuation marks. Tab delimited only.
   
   |cluster|
   
