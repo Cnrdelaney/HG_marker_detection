@@ -9,7 +9,7 @@
 Output
 ==========
 
-Following are examples of COMET output. Descriptions of statistical values can be found in the :doc:`details<details>` section of the manual:
+Following are examples of COMET output. Descriptions of statistical values can be found in the :doc:`details<details>` section of the manual.
 
 **Data:**
 
