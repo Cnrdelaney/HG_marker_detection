@@ -33,6 +33,9 @@ for ease of view, but files should be given as plain text files.
   The first column is cell name (consistent with
   ``markers.txt`` and ``tsne.txt``) and the second is the cluster of
   which the cell is a member. Cell names should avoid using punctuation marks. Tab delimited only.
+  Please note: If you input clusters that start counting at zero, COMET will change the 0th cluster to the next highest
+  from the max to avoid some computational problems. E.G. -> Clusters 0,1,2,3 turn to Clusters 1,2,3,4 where 0 is now 4.
+  Values have not been shifted, the 0 has simply been renamed to 4 while 1, 2, and 3 all stay the same.
   
   |cluster|
   
