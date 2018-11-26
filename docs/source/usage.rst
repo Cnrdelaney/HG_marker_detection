@@ -9,7 +9,7 @@ Input formatting
 -----------------
 
 Before you use COMET with gene expression data, your data should be
-formatted into 3 files as shown below. The graphs below are shown in excel format 
+formatted into 3 files as shown below. The tables below are shown in excel format 
 for ease of view, but files should be given as plain text files.
 
 * ``markers.txt``: The expression matrix table stored as a TXT file (.txt). The first row
