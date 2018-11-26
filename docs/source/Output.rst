@@ -11,6 +11,8 @@ Output
 
 Following are examples of COMET output. Descriptions of statistical values can be found in the :doc:`details<details>` section of the manual:
 
+**Data:**
+
 *CSV  pair output* : 
 Gives the gene-pairs ordered based on our ranking system of
 statistical relevance. Column 'rank' gives the final rank of the pair
@@ -22,8 +24,8 @@ on ranking and the various statistics calculated for each pair.
 Gives the single-gene marker list, ordered based on statistical relevance.
 |sing_csv|                                                                       
 
-.. class:: center 
-**Visualizations**
+
+**Visualizations:**
 
 Shown below is t-sne format, but any two-dimensional visualization method is fine to use as input to COMET.
 
