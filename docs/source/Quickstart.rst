@@ -39,7 +39,7 @@ After this command is entered, COMET will run in the terminal, processing your d
 
 The optional statements are described as follows:
 
--h
+-h ()
     Help.
 
 -g (.txt)
