@@ -114,7 +114,7 @@ The columns of the statistical data are:
 * ``t_pval``: the t-test p significance value corresponding to the test statistic.
 * ``TP``: the true positive rate.
 * ``TN``: the true negative rate.
-*``FoldChange``: the log base 2 fold change of a single gene from the cluster of interest compared to the rest of the cells.
+* ``FoldChange``: the log base 2 fold change of a single gene from the cluster of interest compared to the rest of the cells.
 * ``init rank``: sequential ranking based on ``HG_stat``, where lower ``HG_stat`` is better ranking. No two genes are ranked the same; those with identical hypergeometric statistic values are ranked arbitrarily relative to one another.
 * ``CCS``: Cluster Clear Score. This gives us a statistic for the clearing out of other clusters with the addition of the second gene in comparison with the single gene case. The 'lead gene' is whichever of the pair has the smallest p-value, then we compute weighted True Negative deltas across the other clusters for the lead gene and the pair. This is only computed for a certain number of the top performing 'init rank' gene combinations.
 * ``rank``: Final rank. Takes the average of the the init rank and the CCS to determine which gene combinations are the best performing in both tests.
