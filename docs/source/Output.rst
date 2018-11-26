@@ -9,7 +9,7 @@
 Output
 ==========
 
-Following are examples of COMET output. Descriptions of statistical values can be found in the details section of the manual:
+Following are examples of COMET output. Descriptions of statistical values can be found in the :doc:`details<details>` section of the manual:
 
 *CSV  pair output* : 
 Gives the gene-pairs ordered based on our ranking system of
