@@ -4,6 +4,8 @@
 
 .. _website: http://www.cometsc.com/login
 
+.. |poster| image:: _static/Comet_Poster_fin.pdf
+
 .. |comet| image:: _static/COMET.png
    :width: 25%
 
@@ -12,6 +14,9 @@
 **COMET: Identifying candidate marker panels from single-cell transcriptomic data.**
 
 Official documentation for COMET Beta version.
+
+For a simple picture of what COMET is and how it operates, the following is our poster which was presented at multiple conferences!
+|poster|
 
 Start with :doc:`Quickstart<quickstart>`, or jump right into the :doc:`User Manual<manual>`.
 
