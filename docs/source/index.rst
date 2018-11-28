@@ -4,7 +4,7 @@
 
 .. _website: http://www.cometsc.com/login
 
-.. |poster| image:: _static/Comet_Poster_fin.png
+.. |poster| image:: _static/Comet_Poster_fin_2.png
 
 .. |comet| image:: _static/COMET.png
    :width: 25%
