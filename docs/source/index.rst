@@ -15,7 +15,7 @@
 
 Official documentation for COMET Beta version.
 
-For a simple picture of what COMET is and how it operates, the following is our poster which was presented at multiple conferences!
+For a simple picture of what COMET is and how it operates, the following is our poster from multiple conference presentations.
 
 |poster|
 
