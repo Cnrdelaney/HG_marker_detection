@@ -2,7 +2,7 @@
 
 .. _Github: https://github.com/aaronyaosmith/HG_marker_detection
 
-.. _website: http://www.cometsc.com/login
+.. _website: http://www.cometsc.com/index
 
 .. |poster| image:: _static/Comet_Poster_fin_2.png
 
