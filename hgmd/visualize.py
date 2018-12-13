@@ -29,8 +29,8 @@ CMAP_DISCRETE = cm.get_cmap('bwr')
 
 
 def make_plots(
-    pair, sing, trips, tsne, discrete_exp, marker_exp, plot_pages,
-    combined_path, sing_combined_path, discrete_path, tptn_path,trips_path,sing_tptn_path
+    pair, sing, trips, quads_fin, tsne, discrete_exp, marker_exp, plot_pages,
+    combined_path, sing_combined_path, discrete_path, tptn_path,trips_path,quads_path,sing_tptn_path
 ):
     """
     General function for all visualization generation.  Arguments should be
@@ -55,11 +55,15 @@ def make_plots(
     p_short = pair[pair['Plot']==1]
     #p_short = pair.iloc[:plot_pages]
     s_short = sing[sing['Plot']==1]
-    if trips == None:
+    #s_short = sing.iloc[:plot_pages]
+    if type(trips) == int:
         pass
     else:
         t_short = trips.iloc[:plot_pages]
-
+    if type(quads_fin) == int:
+        pass
+    else:
+        q_short=quads_fin.iloc[:plot_pages]
 
     vmt = np.vectorize(make_title)
     d_plot_genes = zip(
@@ -82,7 +86,7 @@ def make_plots(
         ), p_short['gene_1'].values, p_short['gene_2'].values
     )
 
-    if trips == None:
+    if type(trips) == int:
         pass
     else:
         vmt_2 = np.vectorize(make_trips_title)
@@ -108,11 +112,41 @@ def make_plots(
             )
     
 
+    if type(quads_fin) == int:
+        pass
+    else:
+        vmt_3 = np.vectorize(make_quads_title)
+        q_plot_genes = zip(
+            zip(
+                vmt_3(
+                    q_short['gene_1'], q_short['gene_2'], q_short['gene_3'], q_short['gene_4'],
+                    q_short['rank'], q_short['gene_1'].map(cutoff)
+                    ), vmt_3(
+                        q_short['gene_1'], np.nan, np.nan, np.nan,
+                        q_short['gene_1'].map(rank),
+                        q_short['gene_1'].map(cutoff)
+                        ), vmt_3(
+                            q_short['gene_2'], np.nan, np.nan, np.nan,
+                            q_short['gene_2'].map(rank),
+                            q_short['gene_2'].map(cutoff)
+                            ), vmt_3(
+                                q_short['gene_3'], np.nan, np.nan, np.nan,
+                                q_short['gene_3'].map(rank),
+                                q_short['gene_3'].map(cutoff)
+                                ), vmt_3(
+                                q_short['gene_3'], np.nan, np.nan, np.nan,
+                                q_short['gene_3'].map(rank),
+                                q_short['gene_3'].map(cutoff)
+                                )
+                ), q_short['gene_1'].values, q_short['gene_2'].values, q_short['gene_3'].values, q_short['gene_4'].values)
+
+
+    
     print("Drawing discrete plots for pairs...")
     make_discrete_plots(
         tsne, discrete_exp, d_plot_genes, discrete_path, 2
     )
-    if trips == None:
+    if type(trips) == int:
         pass
     else:
         print("Drawing discrete plots for trips...")
@@ -120,7 +154,13 @@ def make_plots(
             tsne, discrete_exp, t_plot_genes, trips_path, 3
             )
     
-
+    if type(quads_fin) == int:
+        pass
+    else:
+        print("Drawing discrete plots for quads...")
+        make_discrete_plots(
+            tsne, discrete_exp, q_plot_genes, quads_path, 4
+            )
     
     c_plot_genes = zip(
         zip(
@@ -198,6 +238,18 @@ def make_trips_title(gene_1,gene_2,gene_3,rank,cutoff_val):
     else:
         return ("rank %.0f: %s+%s+%s" % (rank, gene_1, gene_2, gene_3)) 
 
+def make_quads_title(gene_1,gene_2,gene_3,gene_4,rank,cutoff_val):
+
+    
+    if pd.isna(gene_2):
+        return ("rank %.0f: %s %.3f" % (rank, gene_1, cutoff_val))
+    elif pd.isna(gene_3):
+        return ("rank %.0f: %s+%s" % (rank, gene_1, gene_2))
+    elif pd.isna(gene_4):
+        return ("rank %.0f: %s+%s+%s" % (rank, gene_1, gene_2, gene_3))
+    else:
+        return ("rank %.0f: %s+%s+%s+%s" % (rank, gene_1, gene_2, gene_3, gene_4))
+    
 def make_plot(ax, title, coords, cmap, draw_cbar=False):
     """
     Make a single graph on ax with given specs.  Plots only absolute values.
@@ -236,6 +288,26 @@ def make_discrete_plots(tsne, discrete_exp, plot_genes, path,num):
 
     :returns: Nothing.
     """
+    def make_quads_discrete_page(fig, ax_triple, titles, gene_1, gene_2, gene_3,gene_4):
+        """Make page with trips discrete plots given titles and genes."""
+        coords_df = tsne.merge(discrete_exp[[gene_1, gene_2, gene_3,gene_4]], on='cell')
+        coords_df['pair'] = coords_df[gene_1] * coords_df[gene_2]
+        coords_df['trips'] = coords_df[gene_1] * coords_df[gene_2] * coords_df[gene_3]
+        coords_df['quads_fin'] = coords_df[gene_1] * coords_df[gene_2] * coords_df[gene_3] * coords_df[gene_4]
+
+        for (graph_index, z_label) in ((0, 'trips'), (1, gene_1), (2, gene_2), (3, gene_3), (4, gene_4)):
+            make_plot(
+                ax=ax_triple[graph_index],
+                title=titles[graph_index],
+                coords=(
+                    coords_df['tSNE_1'].values,
+                    coords_df['tSNE_2'].values,
+                    coords_df[z_label].values
+                ),
+                cmap=CMAP_DISCRETE
+            )
+
+    
     def make_trips_discrete_page(fig, ax_triple, titles, gene_1, gene_2, gene_3):
         """Make page with trips discrete plots given titles and genes."""
         coords_df = tsne.merge(discrete_exp[[gene_1, gene_2, gene_3]], on='cell')
@@ -289,7 +361,39 @@ def make_discrete_plots(tsne, discrete_exp, plot_genes, path,num):
     with PdfPages(path) as pdf:
         for plot_gene in plot_genes:
             # print(plot_gene)
-            if num == 3:
+            if num == 4:
+                fig, ax_triple = plt.subplots(ncols=5, figsize=(15, 5))
+                if pd.isnull(plot_gene[2]):
+                    make_single_discrete_page(
+                        fig=fig, ax_triple=ax_triple,
+                        title=plot_gene[0],
+                        gene=plot_gene[1]
+                        )
+                elif pd.isnull(plot_gene[3]):
+                    make_pair_discrete_page(
+                        fig=fig, ax_triple=ax_triple,
+                        titles=plot_gene[0],
+                        gene_1=plot_gene[1],
+                        gene_2=plot_gene[2]
+                        )
+                elif pd.isnull(plot_gene[4]):
+                    make_trips_discrete_page(
+                        fig=fig, ax_triple=ax_triple,
+                        titles=plot_gene[0],
+                        gene_1=plot_gene[1],
+                        gene_2=plot_gene[2],
+                        gene_3=plot_gene[3]
+                        )
+                else:
+                    make_quads_discrete_page(
+                        fig=fig, ax_triple=ax_triple,
+                        titles=plot_gene[0],
+                        gene_1=plot_gene[1],
+                        gene_2=plot_gene[2],
+                        gene_3=plot_gene[3],
+                        gene_4=plot_gene[4]
+                        )
+            elif num == 3:
                 fig, ax_triple = plt.subplots(ncols=4, figsize=(15, 5))
                 if pd.isnull(plot_gene[2]):
                     make_single_discrete_page(

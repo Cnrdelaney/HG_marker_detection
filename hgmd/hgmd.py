@@ -45,9 +45,12 @@ def add_complements(marker_exp):
 
     :rtype: pandas.DataFrame
     """
-
     for gene in marker_exp.columns:
         marker_exp[gene + '_c'] = -marker_exp[gene]
+    '''
+    for gene in marker_exp.columns:
+        marker_exp[gene + '_c'] = max(marker_exp[gene]) - marker_exp[gene]
+    '''
     return marker_exp
 
 
@@ -74,10 +77,25 @@ def batch_xlmhg(marker_exp, c_list, coi, X=None, L=None):
     """
     # * 1 converts to integer
     mem_list = (c_list == coi) * 1
+    count_n = 0
+    count_2n = 0
+    for cell in mem_list:
+        if cell == 1:
+            count_n = count_n + 1
+        else:
+            continue
+    count_2n = count_n * 2
     if X is None:
-        X = 1
+        X = np.int(.15*count_n)
     if L is None:
-        L = marker_exp.shape[0]
+        if count_2n >= marker_exp.shape[0]:
+            L = np.int(marker_exp.shape[0])
+        else:
+            L = np.int(count_2n)
+        #L = marker_exp.shape[0]
+    print('X = ' + str(X))
+    print('L = ' + str(L))
+    print('Cluster size ' + str(count_n))
     xlmhg = marker_exp.apply(
         lambda col:
         hg.xlmhg_test(
@@ -127,6 +145,51 @@ def batch_t(marker_exp, c_list, coi):
     output[['t_stat', 't_pval']] = pd.DataFrame(
         t.values.tolist(),
         columns=['t_stat', 't_pval']
+    )
+    return output
+
+
+def batch_fold_change(marker_exp, c_list, coi):
+    """Applies log fold change to a gene expression matrix, gene by gene.
+
+    :param marker_exp: A DataFrame whose rows are cell identifiers, columns are
+        gene identifiers, and values are float values representing gene
+        expression.
+    :param c_list: A Series whose indices are cell identifiers, and whose
+        values are the cluster which that cell is part of.
+    :param coi: The cluster of interest.
+    :rtype: pandas.DataFrame
+    """
+    
+    def fold_change(col,c_list,coi):
+        mean0 = col[c_list == coi].mean()
+        mean1 = col[c_list != coi].mean()
+        if mean0 == 0:
+            val = math.nan
+            return val
+        if mean1 == 0:
+            val = math.nan
+            return val
+        val = mean0/mean1
+        return val
+    fc = marker_exp.apply(
+        lambda col:
+        math.log(fold_change(col,c_list,coi),2)
+        )
+    fca = marker_exp.apply(
+        lambda col:
+        abs(math.log(fold_change(col,c_list,coi),2))
+        )
+    output = pd.DataFrame()
+    output['gene_1'] = fc.index
+    output[['FoldChange']] = pd.DataFrame(
+        fc.values.tolist(),
+        columns=['FoldChange']
+    )
+    output['gene_1'] = fca.index
+    output[['FoldChangeAbs']] = pd.DataFrame(
+        fca.values.tolist(),
+        columns=['FoldChangeAbs']
     )
     return output
 
@@ -262,6 +325,7 @@ def tp_tn(discrete_exp, c_list, coi, cluster_number):
     """
 
     #does rest of clusters
+    discrete_exp.fillna(0, inplace=True)
     sing_cluster_exp_matrices = {}
     for clstrs in range(cluster_number):
         if clstrs+1 == coi:
@@ -488,7 +552,6 @@ def combination_product(discrete_exp,c_list,coi,trips_list):
         '''
     ###############
     #Experimental Section
-    #print(trips_list)
     if trips_list == None:
         pass
     else:
@@ -571,7 +634,6 @@ def combination_product(discrete_exp,c_list,coi,trips_list):
         gene_map = np.delete(gene_map,0)
     gene_2_mapped = pd.Index(gene_2_mapped)
 
-                            
 
     
 
@@ -773,8 +835,11 @@ def ranker(pair,xlmhg,sing_tp_tn,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in
             #the sum and not the max
             #if cls_counts[clstrs] <= ( .05 * in_cls_count):
             #    continue
-            TN_before = other_sing_tp_tn[clstrs].loc[lead_gene]['TN']
-            TN_after = other_pair_tp_tn[clstrs].loc[(gene_1,gene_2),'TN']
+            #one = time.time()
+            TN_before = other_sing_tp_tn[clstrs].at[lead_gene,'TN']
+            #two = time.time()
+            TN_after = other_pair_tp_tn[clstrs].at[(gene_1,gene_2),'TN']
+            #three=time.time()
             N = cls_counts[clstrs]
             value =  ( TN_after - TN_before ) / N 
             stats.append(value)
@@ -800,6 +865,7 @@ def ranker(pair,xlmhg,sing_tp_tn,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in
         thresh = 100
     else:
         thresh = 1000
+    loopstart = time.time()
     for index,row in ranked_pair.iterrows():
         #print(row[0])
         #print(row[1])
@@ -817,8 +883,8 @@ def ranker(pair,xlmhg,sing_tp_tn,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in
         gene_1 = row[0]
         gene_2 = row[1]
         #determine which of the two genes is 'lead'
-        stat_1 = xlmhg_cop.loc[gene_1,'HG_stat']
-        stat_2 = xlmhg_cop.loc[gene_2,'HG_stat']
+        stat_1 = xlmhg_cop.at[gene_1,'HG_stat']
+        stat_2 = xlmhg_cop.at[gene_2,'HG_stat']
         if stat_1 <= stat_2:
             lead_gene=gene_1
             follow_gene = gene_2
@@ -833,11 +899,11 @@ def ranker(pair,xlmhg,sing_tp_tn,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in
         #        continue
         #after - before
         #TN rate must improve by .5% at least
-        TN_bef = sing_tp_tn.loc[(lead_gene),'TN']
-        if row[-2] - TN_bef < .01:
-            ranked_pair.drop(index, inplace=True)
+        #TN_bef = sing_tp_tn.loc[(lead_gene),'TN']
+        #if row[-2] - TN_bef < .01:
+        #    ranked_pair.drop(index, inplace=True)
             #print('TN drop')
-            continue
+        #    continue
         #before - after
         #TP rate cannot decrease by more than 5%
         #TP_bef = sing_tp_tn.loc[(lead_gene),'TP']
@@ -859,7 +925,7 @@ def ranker(pair,xlmhg,sing_tp_tn,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in
         if count == thresh:
             break
         
-        ranked_pair.loc[index,'CCS'] = ranked_stat(gene_1,gene_2,lead_gene,cls_counts,other_pair_tp_tn,other_sing_tp_tn,in_cls_count)
+        ranked_pair.at[index,'CCS'] = ranked_stat(gene_1,gene_2,lead_gene,cls_counts,other_pair_tp_tn,other_sing_tp_tn,in_cls_count)
         '''
         for key in stats_debug:
             ranked_pair.loc[index,'CCS_cluster_'+str(key)] = stats_debug[key]
@@ -869,6 +935,7 @@ def ranker(pair,xlmhg,sing_tp_tn,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in
 
     #print(ranked_pair)
     #time.sleep(10000)
+    loopend = time.time()
     ranked_pair.sort_values(by='CCS',ascending=False,inplace=True)
     #print(ranked_pair)
     ranked_pair['CCSrank'] = ranked_pair.reset_index().index + 1
@@ -885,25 +952,29 @@ def ranker(pair,xlmhg,sing_tp_tn,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in
     #time.sleep(100)
     omit_genes = {}
     count = 0
+    if len(ranked_pair.index) < 5000:
+        plot_num = 10
+    else:
+        plot_num = 100
     for index,row in ranked_pair.iterrows():
-        if count == 100:
+        if count == plot_num:
             break
         if row[0] in omit_genes:
             if omit_genes[row[0]] >= 10:
-                ranked_pair.loc[index,'Plot'] = 0
+                ranked_pair.at[index,'Plot'] = 0
             else:
                 if row[2] >= .05:
-                    ranked_pair.loc[index,'Plot'] = 0
+                    ranked_pair.at[index,'Plot'] = 0
                 else:
-                    ranked_pair.loc[index,'Plot'] = 1
+                    ranked_pair.at[index,'Plot'] = 1
                 omit_genes[row[0]] = omit_genes[row[0]]+1
                 count = count + 1
         else:
             omit_genes[row[0]] = 1
             if row[2] >= .05:
-                ranked_pair.loc[index,'Plot'] = 0
+                ranked_pair.at[index,'Plot'] = 0
             else:
-                ranked_pair.loc[index,'Plot'] = 1
+                ranked_pair.at[index,'Plot'] = 1
             count = count + 1
 
     #print(ranked_pair)
@@ -1101,15 +1172,23 @@ def trips_hg(gene_map,in_cls_count,pop_count,trips_in_cls,trips_total,trips_indi
     used_genes = []
     counter=0
     prev_stat = 0
+    dropped=0
+    buff = 0
     for index, row in output.iterrows():
+        #print(counter)
         #row[0] = gene1
         #row[1] = gene2
         #row[2] = gene3
-        if counter == 1000:
+        if counter == 30:
             break
-        if row[-1] < .9:
-            output.drop([index],inplace=True)
-            continue
+        #if row[0] != 'LY6D' or row[1] != 'CD3G_c':
+        #    output.drop([index],inplace=True)
+        #    dropped=dropped + 1
+            #print(dropped)
+        #    continue
+        #if row[-1] < .9:
+        #    output.drop([index],inplace=True)
+        #    continue
         if row[0]==row[1] or row[1]==row[2] or row[0]==row[2]:
             output.drop([index],inplace=True)
             continue

@@ -7,11 +7,13 @@ import numpy as np
 
 from . import hgmd
 from . import visualize as vis
+from . import quads
 import sys
 import multiprocessing
 import time
 import math
 import matplotlib.pyplot as plt
+import random
 #from docs.source import conf
 
 
@@ -57,44 +59,104 @@ def init_parser(parser):
         '-K', nargs='?',default=None,
         help="K-gene combinations to include"
     )
+    parser.add_argument(
+        '-Down', nargs='?',default=False,
+        help="Downsample"
+    )
     return parser
 
 
-def read_data(cls_path, tsne_path, marker_path, gene_path):
+def read_data(cls_path, tsne_path, marker_path, gene_path, D):
     """
     Reads in cluster series, tsne data, marker expression without complements
     at given paths.
     """
     
     cls_ser = pd.read_csv(
-        cls_path, index_col=0, names=['cell', 'cluster'], squeeze=True
+        cls_path, sep='\t', index_col=0, names=['cell', 'cluster'], squeeze=True
     )
     tsne = pd.read_csv(
-        tsne_path, index_col=0, names=['cell', 'tSNE_1', 'tSNE_2']
+        tsne_path, sep='\t', index_col=0, names=['cell', 'tSNE_1', 'tSNE_2']
     )
     #could be optimized to read and check against gene list simultaneously
     #if this is being a bottleneck. Would require unboxing pd.read_csv though.
+    start_= time.time()
     no_complement_marker_exp = pd.read_csv(
-        marker_path, index_col=0
+        marker_path,sep='\t', index_col=0
         ).rename_axis('cell',axis=1)
     #gene list filtering
     #print(no_complement_marker_exp)
     no_complement_marker_exp = np.transpose(no_complement_marker_exp)
+
+    #gene filtering
     #-------------#
     if gene_path is None:
         pass
     else:
         with open(gene_path, "r") as genes:
             init_read = genes.read().splitlines()
-            master_str = init_read[0]
+            master_str = str.upper(init_read[0])
             master_gene_list = master_str.split(",")
             for column_name in no_complement_marker_exp.columns:
-                if column_name in master_gene_list:
-                    continue
+                if str.upper(column_name) in master_gene_list:
+                    pass
                 else:
                     no_complement_marker_exp.drop(column_name, axis=1, inplace=True)
+                
+    #-------------#
+
+    #downsampling
+    #-------------#
+    if D is False:
+        pass
+    else:
+        #total number of cells input
+        N = len(cls_ser)
+        print(N)
+        #downsample target
+        M = 1000
+        if N <= M:
+            return (cls_ser, tsne, no_complement_marker_exp, gene_path)
+        clusters = sorted(cls_ser.unique())
+        counts = { x : 0 for x in clusters}
+        for clus in cls_ser:
+            counts[clus] = counts[clus]+1
+        #at this point counts has values for # cells in cls
+        #dict goes like ->{ cluster:#cells }
+        take_nums = {x : 0 for x in clusters}
+        for clstr in take_nums:
+            take_nums[clstr] = math.ceil(counts[clstr]*(M/N))
+        summ = 0
+        for key in take_nums:
+            summ = summ + take_nums[key]
+        #print('Downsampled cell num ' + str(summ))
+        counts= { x : 0 for x in clusters}
+        new_cls_ser = cls_ser.copy(deep=True)
+        keep_first = 0
+        for index,value in new_cls_ser.iteritems():
+            keep_first = keep_first + 1
+            if keep_first ==1:
+                counts[value] = counts[value]+1
+                continue
+            new_cls_ser.drop(index,inplace=True)
+        cls_ser.drop(cls_ser.index[0],inplace=True)
+        #Now new_cls_ser has all removed except first item, which we can keep
+        for num in range(N-1):
+            init_rand_num = random.randint(0,N-num-1-1)
+            if counts[cls_ser[init_rand_num]] >= take_nums[cls_ser[init_rand_num]]:
+                cls_ser.drop(cls_ser.index[init_rand_num], inplace=True)
+                continue
+            new_cls_ser = new_cls_ser.append(pd.Series([cls_ser[init_rand_num]], index=[cls_ser.index[init_rand_num]]))
+            counts[cls_ser[init_rand_num]] = counts[cls_ser[init_rand_num]]+1
+            cls_ser.drop(cls_ser.index[init_rand_num], inplace=True)
+            
+        new_cls_ser.rename_axis('cell',inplace=True)
+        new_cls_ser.rename('cluster', inplace=True)
+        return(new_cls_ser,tsne,no_complement_marker_exp,gene_path)
+
 
     #-------------#
+
                     
     return (cls_ser, tsne, no_complement_marker_exp, gene_path)
 
@@ -105,7 +167,16 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
     print('########\n# Processing cluster ' + str(cls) + '...\n########')
     print(str(K) + ' gene combinations')
     print('Running t test on singletons...')
+    for index,row in marker_exp.iterrows():
+        if index in cls_ser.index.values.tolist():
+            continue
+        else:
+            marker_exp.drop(index, inplace=True)
+
+    
     t_test = hgmd.batch_t(marker_exp, cls_ser, cls)
+    print('Calculating fold change')
+    fc_test = hgmd.batch_fold_change(marker_exp, cls_ser, cls)
     print('Running XL-mHG on singletons...')
     xlmhg = hgmd.batch_xlmhg(marker_exp, cls_ser, cls, X=X, L=L)
     # We need to slide the cutoff indices before using them,
@@ -124,7 +195,7 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
         .sort_values(by='HG_stat', ascending=True)
 
     ###########
-    if K == 3:
+    if K >= 3:
         #TRIPS ABBREVIATED
         if abbrev == True:
             count = 0
@@ -147,13 +218,49 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
     #Gives us the singleton TP/TNs for COI and for rest of clusters
     #COI is just a DF, rest of clusters are a dict of DFs
     (sing_tp_tn, other_sing_tp_tn) = hgmd.tp_tn(discrete_exp, cls_ser, cls, cluster_number)
-    
+
+    '''
+    for key in other_sing_tp_tn:
+        for index,row in other_sing_tp_tn[key].iterrows():
+            if index == 'LY6D':
+                print(index)
+                print('Cluster '+str(key))
+                print('TP = ')
+                print(row[0])
+            if index == 'CD3G_c':
+                print(index)
+                print('Cluster '+str(key))
+                print('TP = ')
+                print(row[0])
+                
+    time.sleep(10000) 
+    '''
     print('Finding pair expression matrix...')
     (
         gene_map, in_cls_count, pop_count,
         in_cls_product, total_product, upper_tri_indices,
         cluster_exp_matrices, cls_counts
     ) = hgmd.pair_product(discrete_exp, cls_ser, cls, cluster_number)
+
+
+
+    if K >= 4:
+        print('')
+        print('Starting quads')
+        print('')
+        quads_in_cls, quads_total, quads_indices, odd_gene_mapped, even_gene_mapped = quads.combination_product(discrete_exp,cls_ser,cls,trips_list)
+        print('')
+        print('')
+        print('')
+        print('')
+        print('HG TEST ON QUADS')
+        quads_fin = quads.quads_hg(gene_map,in_cls_count,pop_count,quads_in_cls,quads_total,quads_indices,odd_gene_mapped,even_gene_mapped)
+
+
+
+
+
+    
     if K == 3:
         start_trips = time.time()
         print('Finding Trips expression matrix...')
@@ -220,6 +327,18 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
     pair_tp_tn.set_index(['gene_1','gene_2'],inplace=True)
     sing_tp_tn.set_index(['gene_1'], inplace=True)
     rank_start = time.time()
+
+    '''
+    print(other_pair_tp_tn)
+    for key in other_pair_tp_tn:
+        for index, row in other_pair_tp_tn[key].iterrows():
+            if 'LY6D' in index and 'CD3G_c' in index:
+                print(index)
+                print('cluster ' + str(key))
+                print('TP = ')
+                print(row[0])
+    time.sleep(10000)
+    '''
     print('Finding NEW Rank')
     ranked_pair,histogram = hgmd.ranker(pair,xlmhg,sing_tp_tn,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in_cls_count)
     rank_end = time.time()
@@ -235,18 +354,26 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
     print('Exporting cluster ' + str(cls) + ' output to CSV...')
     sing_output = xlmhg\
         .merge(t_test, on='gene_1')\
+        .merge(fc_test, on='gene_1')\
         .merge(sing_tp_tn, on='gene_1')\
         .set_index('gene_1')\
-        .sort_values(by='HG_stat', ascending=True)
+        .sort_values(by='t_pval', ascending=True)
+
+    sing_output['hgrank'] = sing_output.reset_index().index + 1
+    sing_output.sort_values(by='FoldChange', ascending=False, inplace=True)
+    sing_output['fcrank'] = sing_output.reset_index().index + 1
+    sing_output['finrank'] = sing_output[['hgrank', 'fcrank']].mean(axis=1)
+    sing_output.sort_values(by='finrank',ascending=True,inplace=True)
     sing_output['rank'] = sing_output.reset_index().index + 1
+    sing_output.drop('finrank',axis=1, inplace=True)
     count = 1
     for index,row in sing_output.iterrows():
         if count == 100:
             break
         if row[0] >= .05:
-            sing_output.loc[index,'Plot'] = 0
+            sing_output.at[index,'Plot'] = 0
         else:
-            sing_output.loc[index,'Plot'] = 1
+            sing_output.at[index,'Plot'] = 1
             count = count + 1
     sing_output.to_csv(
         csv_path + '/cluster_' + str(cls) + '_singleton.csv'
@@ -278,14 +405,27 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
             csv_path + '/cluster_' + str(cls) + '_trips.csv'
             )
     else:
-        trips_output = None
+        trips_output = int(1)
+    if K >= 4:
+        quads_final = quads_fin\
+          .sort_values(by='HG_stat', ascending=True)
+        quads_final['rank'] = quads_final.reset_index().index + 1
+        quads_final.to_csv(
+            csv_path + '/cluster_' + str(cls) + '_quads.csv'
+            )
+    else:
+        quads_final = int(1)
     print('Drawing plots...')
     #plt.bar(list(histogram.keys()), histogram.values(), color='b')
     #plt.savefig(vis_path + '/cluster_' + str(cls) + '_pair_histogram')
+
+    #if cls == fincls:
+    # cls = 0
     vis.make_plots(
         pair=ranked_pair,
         sing=sing_output,
         trips=trips_output,
+        quads_fin=quads_final,
         tsne=tsne,
         discrete_exp=discrete_exp_full,
         marker_exp=marker_exp,
@@ -296,6 +436,7 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
         discrete_path=vis_path + '/cluster_' + str(cls) + '_discrete.pdf',
         tptn_path=vis_path + 'cluster_' + str(cls) + '_TP_TN.pdf',
         trips_path=vis_path + 'cluster_' + str(cls) + '_discrete_trios.pdf',
+        quads_path=vis_path + 'cluster_' + str(cls) + '_discrete_quads.pdf',
         sing_tptn_path=vis_path + 'cluster_' + str(cls) + '_singleton_TP_TN.pdf'
         )
     end_cls_time=time.time()
@@ -320,13 +461,13 @@ def main():
     start_time = time.time()
     print("Started on " + str(start_dt.isoformat()))
     args = init_parser(argparse.ArgumentParser(
-        description=("Hypergeometric marker detection. Finds markers "
-                     "identifying a cluster.")
+        description=("Hypergeometric marker detection. Finds markers identifying a cluster. Documentation available at https://hgmd.readthedocs.io/en/latest/index.html")
     )).parse_args()
     output_path = args.output_path
     C = args.C
     K = args.K
     Abbrev = args.Abbrev
+    Down = args.Down
     X = args.X
     L = args.L
     marker_file = args.marker
@@ -347,7 +488,7 @@ def main():
     os.makedirs(vis_path, exist_ok=True)
     os.makedirs(pickle_path, exist_ok=True)
     if C is not None:
-        C = int(C)
+        C = abs(int(C))
     else:
         C = 1
     if X is not None:
@@ -360,23 +501,25 @@ def main():
         K = int(K)
     else:
         K = 2
-    if K > 3:
-        K = 3
-        print('Only supports up to 3-gene combinations currently, setting K to 3')
+    if K > 4:
+        K = 4
+        print('Only supports up to 4-gene combinations currently, setting K to 4')
     print("Reading data...")
     if gene_file is None:
         (cls_ser, tsne, no_complement_marker_exp, gene_path) = read_data(
             cls_path=cluster_file,
             tsne_path=tsne_file,
             marker_path=marker_file,
-            gene_path=None
+            gene_path=None,
+            D=Down
         )
     else:
         (cls_ser, tsne, no_complement_marker_exp, gene_path) = read_data(
             cls_path=cluster_file,
             tsne_path=tsne_file,
             marker_path=marker_file,
-            gene_path=gene_file
+            gene_path=gene_file,
+            D=Down
         )
     print("Generating complement data...")
     marker_exp = hgmd.add_complements(no_complement_marker_exp)
@@ -385,8 +528,14 @@ def main():
     # Process clusters sequentially
     clusters = cls_ser.unique()
     clusters.sort()
-
-
+    
+    if clusters[0] == 0:
+        cluster_change = np.delete(clusters,0)
+        cluster_change_2 = np.append(cluster_change,cluster_change[-1]+1)
+        clusters = cluster_change_2
+        fin_clus = clusters[-1]
+        cls_ser.replace(0,fin_clus,inplace=True)
+            #print(row)
     #Below could probably be optimized a little (new_clust not necessary),
     #instead of new clust just go from (x-1)n to (x)n in clusters
     #but it works for now and the complexity it adds is trivial and it makes debugging easier
