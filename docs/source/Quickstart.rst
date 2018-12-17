@@ -1,8 +1,8 @@
-.. _Github: https://github.com/aaronyaosmith/HG_marker_detection
+.. _Github: https://github.com/Cnrdelaney/HG_marker_detection
 
 .. _Python: https://www.python.org/downloads/
 
-.. _website: http://www.cometsc.com/login
+.. _website: http://www.cometsc.com/index
 
 Installation/Quickstart
 ========================
