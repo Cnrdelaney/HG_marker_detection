@@ -171,10 +171,12 @@ def batch_fold_change(marker_exp, c_list, coi):
             val = math.nan
             return val
         val = mean0/mean1
+        if val < 0:
+            return abs(val)
         return val
     fc = marker_exp.apply(
         lambda col:
-        math.log(fold_change(col,c_list,coi),2)
+        (math.log(fold_change(col,c_list,coi),2))
         )
     fca = marker_exp.apply(
         lambda col:
@@ -282,7 +284,7 @@ def mhg_slide(marker_exp, cutoff_val):
     return output
 
 
-def discrete_exp(marker_exp, cutoff_val):
+def discrete_exp(marker_exp, cutoff_val,trips_list):
     """Converts a continuous gene expression matrix to discrete.
 
     As a note: cutoff values correspond to the "top" of non-expression.  Only
@@ -303,6 +305,19 @@ def discrete_exp(marker_exp, cutoff_val):
     output = pd.DataFrame()
     for gene in marker_exp.columns:
         output[gene] = (marker_exp[gene] > cutoff_val[gene]) * 1
+
+    if trips_list is not None:
+        #Ensures the matrix is in the proper order to get the top however many genes for the heuristic approach
+        #create 'new_order', a list with the new ordering. trips_list goes first, rest after in any order
+        rest = []
+        for gene in output.columns:
+            if gene in trips_list:
+                continue
+            else:
+                rest.append(gene)       
+        new_order = trips_list + rest
+        output = output[new_order]
+        
     return output
 
 
@@ -366,7 +381,7 @@ def tp_tn(discrete_exp, c_list, coi, cluster_number):
     return output, sing_cluster_exp_matrices
 
 
-def pair_product(discrete_exp, c_list, coi, cluster_number):
+def pair_product(discrete_exp, c_list, coi, cluster_number, trips_list):
     """Finds paired expression counts.  Returns in matrix form.
 
     The product of the transpose of the discrete_exp DataFrame is a matrix
@@ -407,7 +422,23 @@ def pair_product(discrete_exp, c_list, coi, cluster_number):
             numpy.ndarray)
     """
 
+    '''
+    ###############
+    #Heuristic Section
+    if trips_list == None:
+        pass
+    else:
+        for column in discrete_exp:
+            #print(column)
+            if str(column) in trips_list:
+                continue
+            else:
+                discrete_exp.drop(column, axis=1,inplace=True)
+    ################
+    '''
+    
     gene_map = discrete_exp.columns
+    #print(discrete_exp)
     in_cls_matrix = discrete_exp[c_list == coi].values
     total_matrix = discrete_exp.values
     #get exp matrices for each non-interest cluster for new rank scheme
@@ -551,7 +582,7 @@ def combination_product(discrete_exp,c_list,coi,trips_list):
             )
         '''
     ###############
-    #Experimental Section
+    #Heuristic Section
     if trips_list == None:
         pass
     else:
@@ -687,7 +718,7 @@ def combination_product(discrete_exp,c_list,coi,trips_list):
 
 
 def pair_hg(gene_map, in_cls_count, pop_count, in_cls_product, total_product,
-            upper_tri_indices):
+            upper_tri_indices, abbrev):
     """Finds hypergeometric statistic of gene pairs.
 
     Takes in discrete single-gene expression matrix, and finds the
@@ -750,29 +781,58 @@ def pair_hg(gene_map, in_cls_count, pop_count, in_cls_product, total_product,
     #print(in_cls_product.shape)
     #print(total_product.shape)
 
-    #OLD CODE
-    vhg = np.vectorize(ss.hypergeom.sf, excluded=[1, 2, 4], otypes=[np.float])
-
-    # Only apply to upper triangular
-    hg_result = vhg(
-        in_cls_product[upper_tri_indices],
-        pop_count,
-        in_cls_count,
-        total_product[upper_tri_indices],
-        loc=1
-    )
-    #print(in_cls_product)
-    #print(in_cls_product[upper_tri_indices])
-    #print(total_product)
-    #print(total_product[upper_tri_indices])
-    #print(hg_result)
     #print(gene_map)
-    output = pd.DataFrame({
-        'gene_1': gene_map[upper_tri_indices[0]],
-        'gene_2': gene_map[upper_tri_indices[1]],
-        'HG_stat': hg_result
-    }, columns=['gene_1', 'gene_2', 'HG_stat'])
-    return output
+    #print(total_product)
+    #time.sleep(10000)
+    
+    vhg = np.vectorize(ss.hypergeom.sf, excluded=[1, 2, 4], otypes=[np.float])
+    if abbrev == 'True':
+        count = 0
+        row_count = 1
+        heuristic_limit = 100
+        for num in range(heuristic_limit):
+            count = count + (len(gene_map) - row_count)
+            row_count = row_count + 1
+        revised_row_indices = np.asarray(upper_tri_indices[0][:count])
+        revised_col_indices = np.asarray(upper_tri_indices[1][:count])
+        revised_indices = (revised_row_indices,revised_col_indices)
+        # Only apply to upper triangular    
+        hg_result = vhg(
+            in_cls_product[revised_indices],
+            pop_count,
+            in_cls_count,
+            total_product[revised_indices],
+            loc=1
+            )
+        output = pd.DataFrame({
+            'gene_1': gene_map[revised_indices[0]],
+            'gene_2': gene_map[revised_indices[1]],
+            'HG_stat': hg_result
+            }, columns=['gene_1', 'gene_2', 'HG_stat'])
+        return output, revised_indices
+
+    
+    else:
+        hg_result = vhg(
+            in_cls_product[upper_tri_indices],
+            pop_count,
+            in_cls_count,
+            total_product[upper_tri_indices],
+            loc=1
+        )
+        #print(in_cls_product)
+        #print(in_cls_product[upper_tri_indices])
+        #print(total_product)
+        #print(total_product[upper_tri_indices])
+        #print(hg_result)
+        #print(gene_map)
+        output = pd.DataFrame({
+            'gene_1': gene_map[upper_tri_indices[0]],
+            'gene_2': gene_map[upper_tri_indices[1]],
+            'HG_stat': hg_result
+        }, columns=['gene_1', 'gene_2', 'HG_stat'])
+    
+        return output, None
 
 
 
@@ -953,7 +1013,7 @@ def ranker(pair,xlmhg,sing_tp_tn,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in
     omit_genes = {}
     count = 0
     if len(ranked_pair.index) < 5000:
-        plot_num = 10
+        plot_num = 50
     else:
         plot_num = 100
     for index,row in ranked_pair.iterrows():
@@ -991,7 +1051,7 @@ def ranker(pair,xlmhg,sing_tp_tn,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in
 
 
 def pair_tp_tn(gene_map, in_cls_count, pop_count, in_cls_product,
-               total_product, upper_tri_indices):
+               total_product, upper_tri_indices, abbrev, revised_indices):
     """Finds simple true positive/true negative values for the cluster of
     interest, for all possible pairs of genes.
 
@@ -1024,20 +1084,39 @@ def pair_tp_tn(gene_map, in_cls_count, pop_count, in_cls_product,
             ((pop_count - in_cls_count) - (taken_in_pop - taken_in_cls))
             / (pop_count - in_cls_count)
         )
-    tp_result = np.vectorize(tp)(in_cls_product[upper_tri_indices])
-    tn_result = np.vectorize(tn)(
-        in_cls_product[upper_tri_indices], total_product[upper_tri_indices]
-    )
+
+
+    if abbrev == 'True':
+        tp_result = np.vectorize(tp)(in_cls_product[revised_indices])
+        tn_result = np.vectorize(tn)(
+            in_cls_product[revised_indices], total_product[revised_indices]
+            )
 
     
-    output = pd.DataFrame({
-        'gene_1': gene_map[upper_tri_indices[0]],
-        'gene_2': gene_map[upper_tri_indices[1]],
-        'TP': tp_result,
-        'TN': tn_result
-    }, columns=['gene_1', 'gene_2', 'TP', 'TN'])
+        output = pd.DataFrame({
+            'gene_1': gene_map[revised_indices[0]],
+            'gene_2': gene_map[revised_indices[1]],
+            'TP': tp_result,
+            'TN': tn_result
+            }, columns=['gene_1', 'gene_2', 'TP', 'TN'])
 
-    return output
+        return output
+        
+    else:   
+        tp_result = np.vectorize(tp)(in_cls_product[upper_tri_indices])
+        tn_result = np.vectorize(tn)(
+            in_cls_product[upper_tri_indices], total_product[upper_tri_indices]
+            )
+
+    
+        output = pd.DataFrame({
+            'gene_1': gene_map[upper_tri_indices[0]],
+            'gene_2': gene_map[upper_tri_indices[1]],
+            'TP': tp_result,
+            'TN': tn_result
+            }, columns=['gene_1', 'gene_2', 'TP', 'TN'])
+
+        return output
 
 
 

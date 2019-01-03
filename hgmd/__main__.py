@@ -52,7 +52,7 @@ def init_parser(parser):
         help="L argument for XL-mHG"
     )
     parser.add_argument(
-        '-Abbrev', nargs='?',default=True,
+        '-Abbrev', nargs='?',default=False,
         help="Choose between abbreviated or full 3-gene computation"
     )
     parser.add_argument(
@@ -112,9 +112,9 @@ def read_data(cls_path, tsne_path, marker_path, gene_path, D):
     else:
         #total number of cells input
         N = len(cls_ser)
-        print(N)
+        #print(N)
         #downsample target
-        M = 1000
+        M = int(D)
         if N <= M:
             return (cls_ser, tsne, no_complement_marker_exp, gene_path)
         clusters = sorted(cls_ser.unique())
@@ -157,7 +157,7 @@ def read_data(cls_path, tsne_path, marker_path, gene_path, D):
 
     #-------------#
 
-                    
+            
     return (cls_ser, tsne, no_complement_marker_exp, gene_path)
 
 def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_path,pickle_path,cluster_number,K,abbrev):
@@ -167,13 +167,6 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
     print('########\n# Processing cluster ' + str(cls) + '...\n########')
     print(str(K) + ' gene combinations')
     print('Running t test on singletons...')
-    for index,row in marker_exp.iterrows():
-        if index in cls_ser.index.values.tolist():
-            continue
-        else:
-            marker_exp.drop(index, inplace=True)
-
-    
     t_test = hgmd.batch_t(marker_exp, cls_ser, cls)
     print('Calculating fold change')
     fc_test = hgmd.batch_fold_change(marker_exp, cls_ser, cls)
@@ -195,23 +188,22 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
         .sort_values(by='HG_stat', ascending=True)
 
     ###########
-    if K >= 3:
-        #TRIPS ABBREVIATED
-        if abbrev == True:
-            count = 0
-            trips_list=[]
-            for index,row in xlmhg.iterrows():
-                if count == 100:
-                    break
-                else:
-                    trips_list.append(row[0])
-                    count = count + 1
+    #ABBREVIATED 
+    if abbrev == 'True':
+        print('Heuristic Abbreviation initiated')
+        count = 0
+        trips_list=[]
+        for index,row in xlmhg.iterrows():
+            if count == 100:
+                break
             else:
-                trips_list = None
+                trips_list.append(row[0])
+                count = count + 1
+    else:
+        trips_list = None
     ############
-    
     print('Creating discrete expression matrix...')
-    discrete_exp = hgmd.discrete_exp(marker_exp, cutoff_value)
+    discrete_exp = hgmd.discrete_exp(marker_exp, cutoff_value,trips_list)
 
     discrete_exp_full = discrete_exp.copy()
     print('Finding simple true positives/negatives for singletons...')
@@ -240,8 +232,7 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
         gene_map, in_cls_count, pop_count,
         in_cls_product, total_product, upper_tri_indices,
         cluster_exp_matrices, cls_counts
-    ) = hgmd.pair_product(discrete_exp, cls_ser, cls, cluster_number)
-
+    ) = hgmd.pair_product(discrete_exp, cls_ser, cls, cluster_number,trips_list)
 
 
     if K >= 4:
@@ -270,10 +261,12 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
 
     HG_start = time.time()
     print('Running hypergeometric test on pairs...')
-    pair = hgmd.pair_hg(
+    
+    pair, revised_indices = hgmd.pair_hg(
         gene_map, in_cls_count, pop_count,
-        in_cls_product, total_product, upper_tri_indices
+        in_cls_product, total_product, upper_tri_indices, abbrev
     )
+
     HG_end = time.time()
     print(str(HG_end-HG_start) + ' seconds')
     
@@ -288,7 +281,7 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
     if K == 3:
         HG_start = time.time()
         print('Running hypergeometric test & TP/TN on trips...')
-        if abbrev == True:
+        if abbrev == 'True':
             trips = hgmd.trips_hg(
                 gene_map,in_cls_count,pop_count,
                 trips_in_cls,trips_total,trips_indices,
@@ -310,7 +303,7 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
     print('Finding simple true positives/negatives for pairs...')
     pair_tp_tn = hgmd.pair_tp_tn(
         gene_map, in_cls_count, pop_count,
-        in_cls_product, total_product, upper_tri_indices
+        in_cls_product, total_product, upper_tri_indices, abbrev, revised_indices
     )
     #accumulates pair TP/TN vals for all other clusters
     ##NEW
@@ -318,7 +311,8 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
     for key in cluster_exp_matrices:
         new_pair_tp_tn = hgmd.pair_tp_tn(
             gene_map, cls_counts[key], pop_count,
-            cluster_exp_matrices[key], total_product, upper_tri_indices
+            cluster_exp_matrices[key], total_product, upper_tri_indices,
+            abbrev, revised_indices
         )
         other_pair_tp_tn[key] = new_pair_tp_tn
         other_pair_tp_tn[key].set_index(['gene_1','gene_2'],inplace=True)
@@ -357,7 +351,7 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
         .merge(fc_test, on='gene_1')\
         .merge(sing_tp_tn, on='gene_1')\
         .set_index('gene_1')\
-        .sort_values(by='t_pval', ascending=True)
+        .sort_values(by='HG_stat', ascending=True)
 
     sing_output['hgrank'] = sing_output.reset_index().index + 1
     sing_output.sort_values(by='FoldChange', ascending=False, inplace=True)
@@ -523,7 +517,12 @@ def main():
         )
     print("Generating complement data...")
     marker_exp = hgmd.add_complements(no_complement_marker_exp)
-
+    #throw out vals that show up in expression matrix but not in cluster assignments
+    for index,row in marker_exp.iterrows():
+        if index in cls_ser.index.values.tolist():
+            continue
+        else:
+            marker_exp.drop(index, inplace=True)
     
     # Process clusters sequentially
     clusters = cls_ser.unique()
