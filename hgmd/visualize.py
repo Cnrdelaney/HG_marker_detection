@@ -5,6 +5,8 @@ from matplotlib import cm
 from matplotlib.backends.backend_pdf import PdfPages
 from itertools import repeat
 import time
+import os
+from adjustText import adjust_text
 
 """
 Set of modularized visualization functions for COMET; producing graphs in PDFs.
@@ -64,7 +66,6 @@ def make_plots(
         pass
     else:
         q_short=quads_fin.iloc[:plot_pages]
-
     vmt = np.vectorize(make_title)
     d_plot_genes = zip(
         zip(
@@ -85,7 +86,6 @@ def make_plots(
             )
         ), p_short['gene_1'].values, p_short['gene_2'].values
     )
-
     if type(trips) == int:
         pass
     else:
@@ -143,9 +143,11 @@ def make_plots(
 
     
     print("Drawing discrete plots for pairs...")
+    
     make_discrete_plots(
         tsne, discrete_exp, d_plot_genes, discrete_path, 2
     )
+    
     if type(trips) == int:
         pass
     else:
@@ -180,9 +182,11 @@ def make_plots(
         ), p_short['gene_1'].values, p_short['gene_2'].values
     )
     print("Drawing combined plots...")
+    
     make_combined_plots(
         tsne, discrete_exp, marker_exp, c_plot_genes, combined_path
     )
+    
     c_s_plot_genes = zip(
         zip(
             vmt(
@@ -193,19 +197,21 @@ def make_plots(
         ), s_short.index, repeat(np.nan)
     )
     print("Drawing singleton combined plots...")
+    
     make_combined_plots(
         tsne, discrete_exp, marker_exp, c_s_plot_genes, sing_combined_path
     )
+    
     pair_tp_tn = pair[['gene_1', 'gene_2', 'TP', 'TN']]
     sing_tp_tn = sing[['TP', 'TN']]
     print("Drawing true positive/negative plots...")
     make_tp_tn_plot(
         zip(p_short['gene_1'], p_short['gene_2']),
-        sing_tp_tn, pair_tp_tn, tptn_path
+        sing_tp_tn, pair_tp_tn, tptn_path, 0
     )
     make_tp_tn_plot(
         zip(s_short.index, repeat(np.nan)),
-        sing_tp_tn, pair_tp_tn, sing_tptn_path
+        sing_tp_tn, pair_tp_tn, sing_tptn_path, 1
     )
 
 
@@ -358,82 +364,90 @@ def make_discrete_plots(tsne, discrete_exp, plot_genes, path,num):
             cmap=CMAP_DISCRETE
         )
 
-    with PdfPages(path) as pdf:
-        for plot_gene in plot_genes:
-            # print(plot_gene)
-            if num == 4:
-                fig, ax_triple = plt.subplots(ncols=5, figsize=(15, 5))
-                if pd.isnull(plot_gene[2]):
-                    make_single_discrete_page(
-                        fig=fig, ax_triple=ax_triple,
-                        title=plot_gene[0],
-                        gene=plot_gene[1]
-                        )
-                elif pd.isnull(plot_gene[3]):
-                    make_pair_discrete_page(
-                        fig=fig, ax_triple=ax_triple,
-                        titles=plot_gene[0],
-                        gene_1=plot_gene[1],
-                        gene_2=plot_gene[2]
-                        )
-                elif pd.isnull(plot_gene[4]):
-                    make_trips_discrete_page(
-                        fig=fig, ax_triple=ax_triple,
-                        titles=plot_gene[0],
-                        gene_1=plot_gene[1],
-                        gene_2=plot_gene[2],
-                        gene_3=plot_gene[3]
-                        )
-                else:
-                    make_quads_discrete_page(
-                        fig=fig, ax_triple=ax_triple,
-                        titles=plot_gene[0],
-                        gene_1=plot_gene[1],
-                        gene_2=plot_gene[2],
-                        gene_3=plot_gene[3],
-                        gene_4=plot_gene[4]
-                        )
-            elif num == 3:
-                fig, ax_triple = plt.subplots(ncols=4, figsize=(15, 5))
-                if pd.isnull(plot_gene[2]):
-                    make_single_discrete_page(
-                        fig=fig, ax_triple=ax_triple,
-                        title=plot_gene[0],
-                        gene=plot_gene[1]
-                        )
-                elif pd.isnull(plot_gene[3]):
-                    make_pair_discrete_page(
-                        fig=fig, ax_triple=ax_triple,
-                        titles=plot_gene[0],
-                        gene_1=plot_gene[1],
-                        gene_2=plot_gene[2]
-                        )
-                else:
-                    make_trips_discrete_page(
-                        fig=fig, ax_triple=ax_triple,
-                        titles=plot_gene[0],
-                        gene_1=plot_gene[1],
-                        gene_2=plot_gene[2],
-                        gene_3=plot_gene[3]
-                        )
+    #with PdfPages(path) as pdf:
+    count = 1
+    try:
+        os.makedirs(path)
+    except:
+        os.system('rm -r ' + path)
+        os.makedirs(path)
+    for plot_gene in plot_genes:
+        # print(plot_gene)
+        if num == 4:
+            fig, ax_triple = plt.subplots(ncols=5, figsize=(15, 5))
+            if pd.isnull(plot_gene[2]):
+                make_single_discrete_page(
+                    fig=fig, ax_triple=ax_triple,
+                    title=plot_gene[0],
+                    gene=plot_gene[1]
+                    )
+            elif pd.isnull(plot_gene[3]):
+                make_pair_discrete_page(
+                    fig=fig, ax_triple=ax_triple,
+                    titles=plot_gene[0],
+                    gene_1=plot_gene[1],
+                    gene_2=plot_gene[2]
+                    )
+            elif pd.isnull(plot_gene[4]):
+                make_trips_discrete_page(
+                    fig=fig, ax_triple=ax_triple,
+                    titles=plot_gene[0],
+                    gene_1=plot_gene[1],
+                    gene_2=plot_gene[2],
+                    gene_3=plot_gene[3]
+                    )
             else:
-                fig, ax_triple = plt.subplots(ncols=3, figsize=(15, 5))
-                if pd.isnull(plot_gene[2]):
-                    make_single_discrete_page(
-                        fig=fig, ax_triple=ax_triple,
-                        title=plot_gene[0],
-                        gene=plot_gene[1]
-                        )
-                else:
-                    make_pair_discrete_page(
-                        fig=fig, ax_triple=ax_triple,
-                        titles=plot_gene[0],
-                        gene_1=plot_gene[1],
-                        gene_2=plot_gene[2]
-                        )
+                make_quads_discrete_page(
+                    fig=fig, ax_triple=ax_triple,
+                    titles=plot_gene[0],
+                    gene_1=plot_gene[1],
+                    gene_2=plot_gene[2],
+                    gene_3=plot_gene[3],
+                    gene_4=plot_gene[4]
+                    )
+        elif num == 3:
+            fig, ax_triple = plt.subplots(ncols=4, figsize=(15, 5))
+            if pd.isnull(plot_gene[2]):
+                make_single_discrete_page(
+                    fig=fig, ax_triple=ax_triple,
+                    title=plot_gene[0],
+                    gene=plot_gene[1]
+                    )
+            elif pd.isnull(plot_gene[3]):
+                make_pair_discrete_page(
+                    fig=fig, ax_triple=ax_triple,
+                    titles=plot_gene[0],
+                    gene_1=plot_gene[1],
+                    gene_2=plot_gene[2]
+                    )
+            else:
+                make_trips_discrete_page(
+                    fig=fig, ax_triple=ax_triple,
+                    titles=plot_gene[0],
+                    gene_1=plot_gene[1],
+                    gene_2=plot_gene[2],
+                    gene_3=plot_gene[3]
+                    )
+        else:
+            fig, ax_triple = plt.subplots(ncols=3, figsize=(15, 5))
+            if pd.isnull(plot_gene[2]):
+                make_single_discrete_page(
+                    fig=fig, ax_triple=ax_triple,
+                    title=plot_gene[0],
+                    gene=plot_gene[1]
+                    )
+            else:
+                make_pair_discrete_page(
+                    fig=fig, ax_triple=ax_triple,
+                    titles=plot_gene[0],
+                    gene_1=plot_gene[1],
+                    gene_2=plot_gene[2]
+                    )
                 
-            pdf.savefig(fig)
-            plt.close(fig)
+            #pdf.savefig(fig)
+        plt.savefig( path + '/' + 'rank_' + str(count) + '.png')
+        count=count+1
+        plt.close(fig)
 
 def make_combined_plots(tsne, discrete_exp, marker_exp, plot_genes, path):
     """Plots discrete alongside continuous expression to PDF.
@@ -504,25 +518,33 @@ def make_combined_plots(tsne, discrete_exp, marker_exp, plot_genes, path):
             cmap=CMAP_CONTINUOUS, draw_cbar=True
         )
 
-    with PdfPages(path) as pdf:
-        for plot_gene in plot_genes:
-            if pd.isnull(plot_gene[2]):
-                fig, axes = plt.subplots(ncols=2, figsize=(10, 5))
-                make_single_combined_page(
-                    fig, plot_gene[0][0], axes, plot_gene[1]
-                )
-            else:
-                fig, axes = plt.subplots(
-                    nrows=2, ncols=2, figsize=(10, 10)
-                )
-                make_pair_combined_page(
-                    fig, axes, plot_gene[0], plot_gene[1], plot_gene[2]
-                )
-            pdf.savefig(fig)
-            plt.close(fig)
+    #with PdfPages(path) as pdf:
+    counter = 1
+    try:
+        os.makedirs(path)
+    except:
+        os.system('rm -r ' + path)
+        os.makedirs(path)
+    for plot_gene in plot_genes:
+        if pd.isnull(plot_gene[2]):
+            fig, axes = plt.subplots(ncols=2, figsize=(10, 5))
+            make_single_combined_page(
+                fig, plot_gene[0][0], axes, plot_gene[1]
+            )
+        else:
+            fig, axes = plt.subplots(
+                nrows=2, ncols=2, figsize=(10, 10)
+            )
+            make_pair_combined_page(
+                fig, axes, plot_gene[0], plot_gene[1], plot_gene[2]
+            )
+        #pdf.savefig(fig)
+        plt.savefig( path + '/' + 'rank_' + str(counter) + '.png')
+        counter=counter+1
+        plt.close(fig)
 
 
-def make_tp_tn_plot(plot_genes, sing_tp_tn, pair_tp_tn, path):
+def make_tp_tn_plot(plot_genes, sing_tp_tn, pair_tp_tn, path,sing_pair):
     """Plots TP/TN rates of genes/pairs to PDF.
 
     For each gene/gene pair listed in plot_genes, plot their TP/TN rate on a
@@ -567,9 +589,43 @@ def make_tp_tn_plot(plot_genes, sing_tp_tn, pair_tp_tn, path):
         data, columns=['title', 'TP', 'TN']
     )
 
-    plt.scatter(coords_df['TP'], coords_df['TN'], s=3)
-    for index, row in coords_df.iterrows():
-        plt.annotate(row['title'], (row['TP'] + PADDING, row['TN'] + PADDING))
+    if sing_pair == 1:
+        new_list = [['zero',0,0]]
+        for index, row in coords_df.iterrows():
+            new_list.append([row['title'],row['TP'],row['TN']])
+        new_df = pd.DataFrame(new_list, columns = ['title','TP','TN'])    
+        #print(new_df)
+        concat_new_df = new_df.head(50)
+        #concat_new_df.drop(0,inplace=True)
+        plt.scatter(concat_new_df['TP'], concat_new_df['TN'], s=3,c='red')
+        #print(coords_df)
+        #time.sleep(10000)
+        texts = []
+        for x,y,s in zip(concat_new_df['TP'],concat_new_df['TN'],concat_new_df['title']):
+            texts.append(plt.text(x, y, s, size=7))
+        adjust_text(texts,arrowprops=dict(arrowstyle="->", color='blue', lw=0.5))
 
-    fig.savefig(path)
+
+        
+    else:
+        new_list = [['zero',0,0]]
+        for index, row in coords_df.iterrows():
+            TP = row['TP'].tolist()[-1]
+            TN = row['TN'].tolist()[-1]
+            new_list.append([row['title'],TP,TN])
+        new_df = pd.DataFrame(new_list, columns = ['title','TP','TN'])    
+        #print(new_df)
+        concat_new_df = new_df.head(50)
+        #concat_new_df.drop(0,inplace=True)
+        plt.scatter(concat_new_df['TP'], concat_new_df['TN'], s=3,c='red')
+        #print(coords_df)
+        #time.sleep(10000)
+        texts = []
+        for x,y,s in zip(concat_new_df['TP'],concat_new_df['TN'],concat_new_df['title']):
+            texts.append(plt.text(x, y, s, size=7))
+        adjust_text(texts,arrowprops=dict(arrowstyle="->", color='blue', lw=0.5))
+        
+    #for index, row in coords_df.iterrows():
+    #    plt.annotate(row['title'], (row['TP'] + PADDING, row['TN'] + PADDING))
+    fig.savefig(path + '.png')
     plt.close(fig)

@@ -63,6 +63,10 @@ def init_parser(parser):
         '-Down', nargs='?',default=False,
         help="Downsample"
     )
+    parser.add_argument(
+        '-Trim', nargs='?',default=2000,
+        help="Trim output files"
+    )
     return parser
 
 
@@ -75,6 +79,7 @@ def read_data(cls_path, tsne_path, marker_path, gene_path, D):
     cls_ser = pd.read_csv(
         cls_path, sep='\t', index_col=0, names=['cell', 'cluster'], squeeze=True
     )
+
     tsne = pd.read_csv(
         tsne_path, sep='\t', index_col=0, names=['cell', 'tSNE_1', 'tSNE_2']
     )
@@ -85,7 +90,7 @@ def read_data(cls_path, tsne_path, marker_path, gene_path, D):
         marker_path,sep='\t', index_col=0
         ).rename_axis('cell',axis=1)
     #gene list filtering
-    #print(no_complement_marker_exp)
+            
     no_complement_marker_exp = np.transpose(no_complement_marker_exp)
 
     #gene filtering
@@ -102,14 +107,25 @@ def read_data(cls_path, tsne_path, marker_path, gene_path, D):
                     pass
                 else:
                     no_complement_marker_exp.drop(column_name, axis=1, inplace=True)
+            
                 
     #-------------#
 
     #downsampling
     #-------------#
+    
     if D is False:
         pass
     else:
+        # get number of genes to set downsample threshold
+        gene_numb = len(no_complement_marker_exp.columns)
+        #print(gene_numb)
+
+        if gene_numb > 300:
+            if int(D) < int(2500):
+                pass
+            else:
+                D = int(2500)
         #total number of cells input
         N = len(cls_ser)
         #print(N)
@@ -160,7 +176,7 @@ def read_data(cls_path, tsne_path, marker_path, gene_path, D):
             
     return (cls_ser, tsne, no_complement_marker_exp, gene_path)
 
-def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_path,pickle_path,cluster_number,K,abbrev):
+def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_path,pickle_path,cluster_number,K,abbrev,cluster_overall,Trim):
     #for cls in clusters:
     # To understand the flow of this section, read the print statements.
     start_cls_time = time.time()
@@ -172,6 +188,13 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
     fc_test = hgmd.batch_fold_change(marker_exp, cls_ser, cls)
     print('Running XL-mHG on singletons...')
     xlmhg = hgmd.batch_xlmhg(marker_exp, cls_ser, cls, X=X, L=L)
+    '''
+    #print(xlmhg.to_string())
+    #tester = marker_exp['Reg4'].copy(deep=True)
+    
+    #tester.sort_values(inplace=True)
+    #print(xlmhg['mHG_cutoff'].to_string())
+    '''
     # We need to slide the cutoff indices before using them,
     # to be sure they can be used in the real world. See hgmd.mhg_slide()
     cutoff_value = hgmd.mhg_cutoff_value(
@@ -204,13 +227,29 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
     ############
     print('Creating discrete expression matrix...')
     discrete_exp = hgmd.discrete_exp(marker_exp, cutoff_value,trips_list)
+    '''
+    #For checking the sliding issue
+    count = 0
+    print(discrete_exp['Reg4'].sort_values(ascending=False).head(667))
+    #time.sleep(100000)
+    print(cls_ser)
+    for index in discrete_exp['Reg4'].sort_values(ascending=False).head(667).iteritems():
+        for index2 in cls_ser.iteritems():
+            if index[0] == index2[0]:
+                if index2[1] == 0:
+                    count = count +1
+    print(count)
+    print(discrete_exp['Reg4'].sort_values(ascending=False).head(70))
+    print(cls_ser.to_string())
+    #print(marker_exp['1600029D21Rik'].sort_values(ascending=False).head(160))
+    #time.sleep(100000)
+    '''
 
     discrete_exp_full = discrete_exp.copy()
     print('Finding simple true positives/negatives for singletons...')
     #Gives us the singleton TP/TNs for COI and for rest of clusters
     #COI is just a DF, rest of clusters are a dict of DFs
-    (sing_tp_tn, other_sing_tp_tn) = hgmd.tp_tn(discrete_exp, cls_ser, cls, cluster_number)
-
+    (sing_tp_tn, other_sing_tp_tn) = hgmd.tp_tn(discrete_exp, cls_ser, cls, cluster_number, cluster_overall)
     '''
     for key in other_sing_tp_tn:
         for index,row in other_sing_tp_tn[key].iterrows():
@@ -232,8 +271,7 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
         gene_map, in_cls_count, pop_count,
         in_cls_product, total_product, upper_tri_indices,
         cluster_exp_matrices, cls_counts
-    ) = hgmd.pair_product(discrete_exp, cls_ser, cls, cluster_number,trips_list)
-
+    ) = hgmd.pair_product(discrete_exp, cls_ser, cls, cluster_number,trips_list,cluster_overall)
 
     if K >= 4:
         print('')
@@ -261,12 +299,10 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
 
     HG_start = time.time()
     print('Running hypergeometric test on pairs...')
-    
     pair, revised_indices = hgmd.pair_hg(
         gene_map, in_cls_count, pop_count,
         in_cls_product, total_product, upper_tri_indices, abbrev
     )
-
     HG_end = time.time()
     print(str(HG_end-HG_start) + ' seconds')
     
@@ -274,10 +310,10 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
     .sort_values(by='HG_stat', ascending=True)
     
     pair_out_initial['rank'] = pair_out_initial.reset_index().index + 1
-    pair_out_initial.to_csv(
-    csv_path + '/cluster_' + str(cls) + '_pair_init_rank.csv'
+    pair_out_print = pair_out_initial.head(Trim)
+    pair_out_print.to_csv(
+    csv_path + '/cluster_' + str(cls) + '_pair_HG_stat_ranked.csv'
     )
-
     if K == 3:
         HG_start = time.time()
         print('Running hypergeometric test & TP/TN on trips...')
@@ -296,7 +332,6 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
             #print(trips)
             HG_end = time.time()
             print(str(HG_end-HG_start) + ' seconds')
-
 
 
     # Pair TP/TN FOR THIS CLUSTER
@@ -322,17 +357,6 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
     sing_tp_tn.set_index(['gene_1'], inplace=True)
     rank_start = time.time()
 
-    '''
-    print(other_pair_tp_tn)
-    for key in other_pair_tp_tn:
-        for index, row in other_pair_tp_tn[key].iterrows():
-            if 'LY6D' in index and 'CD3G_c' in index:
-                print(index)
-                print('cluster ' + str(key))
-                print('TP = ')
-                print(row[0])
-    time.sleep(10000)
-    '''
     print('Finding NEW Rank')
     ranked_pair,histogram = hgmd.ranker(pair,xlmhg,sing_tp_tn,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in_cls_count)
     rank_end = time.time()
@@ -362,13 +386,18 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
     sing_output.drop('finrank',axis=1, inplace=True)
     count = 1
     for index,row in sing_output.iterrows():
+        #print(row[8])
         if count == 100:
             break
         if row[0] >= .05:
             sing_output.at[index,'Plot'] = 0
         else:
-            sing_output.at[index,'Plot'] = 1
+            if row[8] <= .15:
+                sing_output.at[index,'Plot'] = 0
+            else:
+                sing_output.at[index,'Plot'] = 1
             count = count + 1
+
     sing_output.to_csv(
         csv_path + '/cluster_' + str(cls) + '_singleton.csv'
     )
@@ -385,8 +414,9 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
     #    .merge(pair_tp_tn, on=['gene_1', 'gene_2'], how='left')
     #print(pair)
     #pair_output['rank'] = pair_output.reset_index().index + 1
-    ranked_pair.to_csv(
-        csv_path + '/cluster_' + str(cls) + '_pair_ranked.csv'
+    ranked_print = ranked_pair.head(Trim)
+    ranked_print.to_csv(
+        csv_path + '/cluster_' + str(cls) + '_pair_final_ranking.csv'
     )
     #Add trips data pages
     #does not currently do new rank scheme
@@ -395,7 +425,8 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
           .sort_values(by='HG_stat', ascending=True)
           #print(trips_output)
         trips_output['rank'] = trips_output.reset_index().index + 1
-        trips_output.to_csv(
+        trips_print = trips_output.head(Trim)
+        trips_print.to_csv(
             csv_path + '/cluster_' + str(cls) + '_trips.csv'
             )
     else:
@@ -404,7 +435,8 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
         quads_final = quads_fin\
           .sort_values(by='HG_stat', ascending=True)
         quads_final['rank'] = quads_final.reset_index().index + 1
-        quads_final.to_csv(
+        quads_print = quads_final.head(Trim)
+        quads_print.to_csv(
             csv_path + '/cluster_' + str(cls) + '_quads.csv'
             )
     else:
@@ -424,14 +456,14 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
         discrete_exp=discrete_exp_full,
         marker_exp=marker_exp,
         plot_pages=plot_pages,
-        combined_path=vis_path + '/cluster_' + str(cls) + '_combined.pdf',
+        combined_path=vis_path + '/cluster_' + str(cls) + '_pairs_as_singletons',
         sing_combined_path=vis_path + '/cluster_' +
-        str(cls) + '_singleton_combined.pdf',
-        discrete_path=vis_path + '/cluster_' + str(cls) + '_discrete.pdf',
-        tptn_path=vis_path + 'cluster_' + str(cls) + '_TP_TN.pdf',
-        trips_path=vis_path + 'cluster_' + str(cls) + '_discrete_trios.pdf',
-        quads_path=vis_path + 'cluster_' + str(cls) + '_discrete_quads.pdf',
-        sing_tptn_path=vis_path + 'cluster_' + str(cls) + '_singleton_TP_TN.pdf'
+        str(cls) + '_singleton',
+        discrete_path=vis_path + '/cluster_' + str(cls) + '_discrete_pairs',
+        tptn_path=vis_path + 'cluster_' + str(cls) + 'pair_TP_TN',
+        trips_path=vis_path + 'cluster_' + str(cls) + '_discrete_trios',
+        quads_path=vis_path + 'cluster_' + str(cls) + '_discrete_quads',
+        sing_tptn_path=vis_path + 'cluster_' + str(cls) + '_singleton_TP_TN'
         )
     end_cls_time=time.time()
     print(str(end_cls_time - start_cls_time) + ' seconds')
@@ -468,6 +500,7 @@ def main():
     tsne_file = args.tsne
     cluster_file = args.cluster
     gene_file = args.g
+    Trim = args.Trim
     plot_pages = 30  # number of genes to plot (starting with highest ranked)
 
     # TODO: gene pairs with expression ratio within the cluster of interest
@@ -478,9 +511,28 @@ def main():
     csv_path = output_path + 'data/'
     vis_path = output_path + 'vis/'
     pickle_path = output_path + '_pickles/'
-    os.makedirs(csv_path, exist_ok=True)
-    os.makedirs(vis_path, exist_ok=True)
-    os.makedirs(pickle_path, exist_ok=True)
+    try:
+        os.makedirs(csv_path)
+    except:
+        os.system('rm -r ' + csv_path)
+        os.makedirs(csv_path)
+
+    try:
+        os.makedirs(vis_path)
+    except:
+        os.system('rm -r ' + vis_path)
+        os.makedirs(vis_path)
+
+    try:
+        os.makedirs(pickle_path)
+    except:
+        os.system('rm -r ' + pickle_path)
+        os.makedirs(pickle_path)
+
+    if Trim is not None:
+        Trim = int(Trim)
+    else:
+        Trim = int(2000)
     if C is not None:
         C = abs(int(C))
     else:
@@ -517,23 +569,40 @@ def main():
         )
     print("Generating complement data...")
     marker_exp = hgmd.add_complements(no_complement_marker_exp)
+    
     #throw out vals that show up in expression matrix but not in cluster assignments
-    for index,row in marker_exp.iterrows():
-        if index in cls_ser.index.values.tolist():
+    for ind,row in marker_exp.iterrows():
+        if ind in cls_ser.index.values.tolist():
             continue
         else:
-            marker_exp.drop(index, inplace=True)
-    
+            marker_exp.drop(ind, inplace=True)
+        #print(marker_exp.index.values.tolist().count(str(ind)))
+        #print(marker_exp[index])
+    '''
+    #throw out cls_ser vals not in marker_exp
+    for index in cls_ser.index.values.tolist():
+        if index in marker_exp.columns:
+            continue
+        else:
+            cls_ser.drop(index,inplace=True)
+    '''
+
+    marker_exp.sort_values(by='cell',inplace=True)
+    cls_ser.sort_index(inplace=True)
+
+            
     # Process clusters sequentially
     clusters = cls_ser.unique()
     clusters.sort()
-    
+    cluster_overall=clusters.copy()
+    '''
     if clusters[0] == 0:
         cluster_change = np.delete(clusters,0)
         cluster_change_2 = np.append(cluster_change,cluster_change[-1]+1)
         clusters = cluster_change_2
         fin_clus = clusters[-1]
         cls_ser.replace(0,fin_clus,inplace=True)
+    '''
             #print(row)
     #Below could probably be optimized a little (new_clust not necessary),
     #instead of new clust just go from (x-1)n to (x)n in clusters
@@ -546,6 +615,10 @@ def main():
         cores = len(clusters)
     #below loops allow for splitting the job based on core choice
     group_num  = math.ceil((len(clusters) / cores ))
+    #print(group_num)
+    #print(clusters)
+    #print(cluster_overall)
+    #time.sleep(1000)
     for element in range(group_num):
         new_clusters = clusters[:cores]
         print(new_clusters)
@@ -556,14 +629,15 @@ def main():
         #clusters = [1 2 3 4 5 6] & cores = 4 --> new_clusters = [1 2 3 4], new_clusters = [5 6]
         for cls in new_clusters:
             p = multiprocessing.Process(target=process,
-                args=(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_path,pickle_path,cluster_number,K,Abbrev))
+                args=(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_path,pickle_path,cluster_number,K,Abbrev,cluster_overall,Trim))
             jobs.append(p)
             p.start()
         p.join()
         
+            #print(cls)
         new_clusters = []
         clusters = clusters[cores:len(clusters)]
-        print(clusters)
+        #print(clusters)
 
     end_time = time.time()
 

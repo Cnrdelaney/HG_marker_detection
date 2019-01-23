@@ -46,7 +46,7 @@ def add_complements(marker_exp):
     :rtype: pandas.DataFrame
     """
     for gene in marker_exp.columns:
-        marker_exp[gene + '_c'] = -marker_exp[gene]
+        marker_exp[gene + '_negation'] = -marker_exp[gene]
     '''
     for gene in marker_exp.columns:
         marker_exp[gene + '_c'] = max(marker_exp[gene]) - marker_exp[gene]
@@ -112,6 +112,7 @@ def batch_xlmhg(marker_exp, c_list, coi, X=None, L=None):
         xlmhg.values.tolist(),
         columns=['HG_stat', 'mHG_cutoff', 'mHG_pval']
     )
+    #time.sleep(100000)
     return output
 
 
@@ -227,7 +228,7 @@ def mhg_cutoff_value(marker_exp, cutoff_ind):
         gene = row['gene_1']
         val = marker_exp[gene].sort_values(
             ascending=False).iloc[row['mHG_cutoff']]
-        if re.compile(".*_c$").match(gene):
+        if re.compile(".*_negation$").match(gene):
             return val - FLOAT_PRECISION
         else:
             return val + FLOAT_PRECISION
@@ -321,7 +322,7 @@ def discrete_exp(marker_exp, cutoff_val,trips_list):
     return output
 
 
-def tp_tn(discrete_exp, c_list, coi, cluster_number):
+def tp_tn(discrete_exp, c_list, coi, cluster_number, cluster_overall):
     """Finds simple true positive/true negative values for the cluster of
     interest.
 
@@ -342,46 +343,54 @@ def tp_tn(discrete_exp, c_list, coi, cluster_number):
     #does rest of clusters
     discrete_exp.fillna(0, inplace=True)
     sing_cluster_exp_matrices = {}
-    for clstrs in range(cluster_number):
-        if clstrs+1 == coi:
+    for clstrs in cluster_overall:
+        if clstrs == coi:
             continue
-        mem_list = (c_list == (clstrs+1)) * 1
+        mem_list = (c_list == (clstrs)) * 1
         tp_tn =discrete_exp.apply(
             lambda col: (
                 np.dot(mem_list, col.values) / np.sum(mem_list),
                 np.dot(1 - mem_list, 1 - col.values) / np.sum(1 - mem_list),
             )
         )
-        sing_cluster_exp_matrices[clstrs+1] = pd.DataFrame()
-        sing_cluster_exp_matrices[clstrs+1]['gene_1'] = tp_tn.index
-        sing_cluster_exp_matrices[clstrs+1][['TP', 'TN']] = pd.DataFrame(
+        sing_cluster_exp_matrices[clstrs] = pd.DataFrame()
+        sing_cluster_exp_matrices[clstrs]['gene_1'] = tp_tn.index
+        sing_cluster_exp_matrices[clstrs][['TP', 'TN']] = pd.DataFrame(
             tp_tn.values.tolist(),
             columns=['TP', 'TN']
         )
-        sing_cluster_exp_matrices[clstrs+1].set_index('gene_1',inplace=True)
+        sing_cluster_exp_matrices[clstrs].set_index('gene_1',inplace=True)
         
 
     #does our cluster of interest
     # * 1 converts to integer
     mem_list = (c_list == coi) * 1
+    
     tp_tn = discrete_exp.apply(
         lambda col: (
             np.dot(mem_list, col.values) / np.sum(mem_list),
-            np.dot(1 - mem_list, 1 - col.values) / np.sum(1 - mem_list),
+            np.dot(1 - mem_list, 1 - col.values) / np.sum(1 - mem_list)
         )
     )
+    '''
+    tp_tn = discrete_exp.apply(
+        lambda col: (
+            np.dot(mem_list, col.values) / np.sum(mem_list),
+            np.dot(1 - mem_list, 1 - col.values) / np.sum(1 - mem_list)
+        )
+    )
+    '''
     output = pd.DataFrame()
     output['gene_1'] = tp_tn.index
     output[['TP', 'TN']] = pd.DataFrame(
         tp_tn.values.tolist(),
         columns=['TP', 'TN']
     )
-    
     #outputs a DF for COI and a dict of DF's for rest
     return output, sing_cluster_exp_matrices
 
 
-def pair_product(discrete_exp, c_list, coi, cluster_number, trips_list):
+def pair_product(discrete_exp, c_list, coi, cluster_number, trips_list,cluster_overall):
     """Finds paired expression counts.  Returns in matrix form.
 
     The product of the transpose of the discrete_exp DataFrame is a matrix
@@ -438,20 +447,19 @@ def pair_product(discrete_exp, c_list, coi, cluster_number, trips_list):
     '''
     
     gene_map = discrete_exp.columns
-    #print(discrete_exp)
     in_cls_matrix = discrete_exp[c_list == coi].values
     total_matrix = discrete_exp.values
     #get exp matrices for each non-interest cluster for new rank scheme
     #(clstrs + 1 because range starts a list @ 0)
     cluster_exp_matrices = {}
     cls_counts = {}
-    for clstrs in range(cluster_number):
-        if clstrs+1 == coi:
+    for clstrs in cluster_overall:
+        if clstrs == coi:
             pass
         else:
-            cluster_exp_matrices[clstrs+1] = discrete_exp[c_list == (clstrs+1)].values
-            cls_counts[clstrs+1] = np.size(cluster_exp_matrices[clstrs+1],0)
-            cluster_exp_matrices[clstrs+1]=np.matmul(np.transpose(cluster_exp_matrices[clstrs+1]),cluster_exp_matrices[clstrs+1] )
+            cluster_exp_matrices[clstrs] = discrete_exp[c_list == (clstrs)].values
+            cls_counts[clstrs] = np.size(cluster_exp_matrices[clstrs],0)
+            cluster_exp_matrices[clstrs]=np.matmul(np.transpose(cluster_exp_matrices[clstrs]),cluster_exp_matrices[clstrs] )
 
     in_cls_count = np.size(in_cls_matrix, 0)
     pop_count = np.size(total_matrix, 0)
@@ -890,7 +898,9 @@ def ranker(pair,xlmhg,sing_tp_tn,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in
     def ranked_stat(gene_1,gene_2,lead_gene,cls_counts,other_pair_tp_tn,other_sing_tp_tn,in_cls_count):
         stats=[]
         stats_debug = {}
+        #print(cls_counts)
         for clstrs in cls_counts:
+            #print(clstrs)
             #this small cluster ignoring doesnt really matter when using
             #the sum and not the max
             #if cls_counts[clstrs] <= ( .05 * in_cls_count):
@@ -913,7 +923,7 @@ def ranker(pair,xlmhg,sing_tp_tn,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in
     xlmhg_cop = xlmhg_cop.set_index('gene_1')
     ranked_pair = pair.copy()
     ranked_pair.sort_values(by='HG_stat',ascending=True,inplace=True)
-    ranked_pair['initrank'] = ranked_pair.reset_index().index + 1
+    ranked_pair['HG_rank'] = ranked_pair.reset_index().index + 1
     #print(ranked_pair)
     
     #below not used because this does ALL pairs (too many)
@@ -998,10 +1008,10 @@ def ranker(pair,xlmhg,sing_tp_tn,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in
     loopend = time.time()
     ranked_pair.sort_values(by='CCS',ascending=False,inplace=True)
     #print(ranked_pair)
-    ranked_pair['CCSrank'] = ranked_pair.reset_index().index + 1
+    ranked_pair['CCS_rank'] = ranked_pair.reset_index().index + 1
     #print(ranked_pair)
     #time.sleep(1000)
-    ranked_pair['finalrank'] = ranked_pair[['initrank', 'CCSrank']].mean(axis=1)
+    ranked_pair['finalrank'] = ranked_pair[['HG_rank', 'CCS_rank']].mean(axis=1)
     #print(ranked_pair)
     ranked_pair.sort_values(by='finalrank',ascending=True,inplace=True)
     #print(ranked_pair)
@@ -1017,6 +1027,7 @@ def ranker(pair,xlmhg,sing_tp_tn,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in
     else:
         plot_num = 100
     for index,row in ranked_pair.iterrows():
+        #print(row[3])
         if count == plot_num:
             break
         if row[0] in omit_genes:
@@ -1026,7 +1037,10 @@ def ranker(pair,xlmhg,sing_tp_tn,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in
                 if row[2] >= .05:
                     ranked_pair.at[index,'Plot'] = 0
                 else:
-                    ranked_pair.at[index,'Plot'] = 1
+                    if row[3] <= .15:
+                        ranked_pair.at[index,'Plot'] = 0
+                    else:
+                        ranked_pair.at[index,'Plot'] = 1
                 omit_genes[row[0]] = omit_genes[row[0]]+1
                 count = count + 1
         else:
@@ -1074,8 +1088,6 @@ def pair_tp_tn(gene_map, in_cls_count, pop_count, in_cls_product,
     """
 
 
-
-    
     def tp(taken_in_cls):
         return taken_in_cls / in_cls_count
 
@@ -1102,13 +1114,12 @@ def pair_tp_tn(gene_map, in_cls_count, pop_count, in_cls_product,
 
         return output
         
-    else:   
+    else:
+
         tp_result = np.vectorize(tp)(in_cls_product[upper_tri_indices])
         tn_result = np.vectorize(tn)(
             in_cls_product[upper_tri_indices], total_product[upper_tri_indices]
             )
-
-    
         output = pd.DataFrame({
             'gene_1': gene_map[upper_tri_indices[0]],
             'gene_2': gene_map[upper_tri_indices[1]],
