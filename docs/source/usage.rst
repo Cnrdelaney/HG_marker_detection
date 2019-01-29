@@ -12,15 +12,14 @@ Before you use COMET with gene expression data, your data should be
 formatted into 3 files as shown below. The tables below are shown in excel format 
 for ease of view, but files should be given as plain text files.
 
-* ``markers.txt``: The expression matrix table stored as a TXT file (.txt). The first row
-  of the table lists cell names, while the first column
+* ``markers.txt``: The expression matrix table stored as a TXT file (.txt). The first column
+  of the table lists cell names, while the first row
   lists genes. The cell at the very top left should be
   blank. Each element in the rest of the table should contain a
   numerical gene expression value, corresponding to the row/cell and
   column/gene of the element. Tab delimited only. COMET does not do any preprocessing on 
   this file.
-  
-  |markers|
+ 
   
 * ``tsne.txt``: The t-SNE data stored as a TXT file (.txt). Consists of three columns separated by tabs, 
   the first column is cell name (the same as those in
