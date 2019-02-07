@@ -52,7 +52,7 @@ def init_parser(parser):
         help="L argument for XL-mHG"
     )
     parser.add_argument(
-        '-Abbrev', nargs='?',default=False,
+        '-Abbrev', nargs='?',default=[],
         help="Choose between abbreviated or full 3-gene computation"
     )
     parser.add_argument(
@@ -106,8 +106,10 @@ def read_data(cls_path, tsne_path, marker_path, gene_path, D):
                 if str.upper(column_name) in master_gene_list:
                     pass
                 else:
-                    no_complement_marker_exp.drop(column_name, axis=1, inplace=True)
-            
+                    try:
+                        no_complement_marker_exp.drop(column_name, axis=1, inplace=True)
+                    except:
+                        pass
                 
     #-------------#
 
@@ -121,7 +123,7 @@ def read_data(cls_path, tsne_path, marker_path, gene_path, D):
         gene_numb = len(no_complement_marker_exp.columns)
         #print(gene_numb)
 
-        if gene_numb > 300:
+        if gene_numb > 3000:
             if int(D) < int(2500):
                 pass
             else:
@@ -212,12 +214,12 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
 
     ###########
     #ABBREVIATED 
-    if abbrev == 'True':
-        print('Heuristic Abbreviation initiated')
+    if len(abbrev) > 0:
+        print('Heuristic Abbreviation initiated for ' + str(abbrev) )
         count = 0
         trips_list=[]
         for index,row in xlmhg.iterrows():
-            if count == 100:
+            if count == 150:
                 break
             else:
                 trips_list.append(row[0])
@@ -317,7 +319,8 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
     if K == 3:
         HG_start = time.time()
         print('Running hypergeometric test & TP/TN on trips...')
-        if abbrev == 'True':
+        ab = '3'
+        if ab in abbrev:
             trips = hgmd.trips_hg(
                 gene_map,in_cls_count,pop_count,
                 trips_in_cls,trips_total,trips_indices,
@@ -386,9 +389,16 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
     sing_output.drop('finrank',axis=1, inplace=True)
     count = 1
     for index,row in sing_output.iterrows():
-        #print(row[8])
         if count == 100:
-            break
+            if index == 'Cr2':
+                sing_output.at[index,'Plot'] = 1
+            elif index == 'Spn':
+                sing_output.at[index,'Plot'] = 1
+            elif index == 'Fas':
+                sing_output.at[index,'Plot'] = 1
+            else:
+                sing_output.at[index,'Plot'] = 0
+            continue
         if row[0] >= .05:
             sing_output.at[index,'Plot'] = 0
         else:
@@ -398,6 +408,8 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
                 sing_output.at[index,'Plot'] = 1
             count = count + 1
 
+
+    
     sing_output.to_csv(
         csv_path + '/cluster_' + str(cls) + '_singleton.csv'
     )

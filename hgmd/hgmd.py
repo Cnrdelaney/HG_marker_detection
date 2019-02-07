@@ -794,7 +794,8 @@ def pair_hg(gene_map, in_cls_count, pop_count, in_cls_product, total_product,
     #time.sleep(10000)
     
     vhg = np.vectorize(ss.hypergeom.sf, excluded=[1, 2, 4], otypes=[np.float])
-    if abbrev == 'True':
+    ab = '2'
+    if ab in abbrev:
         count = 0
         row_count = 1
         heuristic_limit = 100
@@ -839,7 +840,6 @@ def pair_hg(gene_map, in_cls_count, pop_count, in_cls_product, total_product,
             'gene_2': gene_map[upper_tri_indices[1]],
             'HG_stat': hg_result
         }, columns=['gene_1', 'gene_2', 'HG_stat'])
-    
         return output, None
 
 
@@ -940,7 +940,7 @@ def ranker(pair,xlmhg,sing_tp_tn,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in
         #print(row[0])
         #print(row[1])
         
-            
+           
         if row[0] in omit_pairs:
             if omit_pairs[row[0]] > 200:
                 ranked_pair.drop(index, inplace=True)
@@ -949,7 +949,7 @@ def ranker(pair,xlmhg,sing_tp_tn,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in
             if omit_pairs[row[1]] > 200:
                 ranked_pair.drop(index, inplace=True)
                 continue
-
+        
         gene_1 = row[0]
         gene_2 = row[1]
         #determine which of the two genes is 'lead'
@@ -1059,8 +1059,6 @@ def ranker(pair,xlmhg,sing_tp_tn,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in
 
     for item in pop_list:
         omit_pairs.pop(item)
-
-    
     return ranked_pair,omit_pairs
 
 
@@ -1097,8 +1095,8 @@ def pair_tp_tn(gene_map, in_cls_count, pop_count, in_cls_product,
             / (pop_count - in_cls_count)
         )
 
-
-    if abbrev == 'True':
+    ab = '2'
+    if ab in abbrev:
         tp_result = np.vectorize(tp)(in_cls_product[revised_indices])
         tn_result = np.vectorize(tn)(
             in_cls_product[revised_indices], total_product[revised_indices]

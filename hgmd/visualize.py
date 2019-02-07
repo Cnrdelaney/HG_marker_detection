@@ -176,8 +176,8 @@ def make_plots(
                 p_short['gene_2'], np.nan,
                 p_short['gene_2'].map(rank),
                 p_short['gene_2'].map(cutoff),
-                p_short['gene_1'].map(TP_sing),
-                p_short['gene_1'].map(TN_sing)
+                p_short['gene_2'].map(TP_sing),
+                p_short['gene_2'].map(TN_sing)
             )
         ), p_short['gene_1'].values, p_short['gene_2'].values
     )
