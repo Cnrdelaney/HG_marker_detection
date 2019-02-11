@@ -121,15 +121,14 @@ The columns of the statistical data are:
 9. Generate and export visualizations.
 -----------------------------------------
 
-For each cluster, COMET generates five PDF files containing visualizations of the statistical results. Each PDF``s name is prefixed by the cluster name, and includes visuals for only the first few highest ranked genes/combinations.
+For each cluster, COMET generates five - seven PNG file folders containing visualizations of the statistical results. Each folder's name is prefixed by the cluster name, and includes visuals for only the first few highest ranked genes/combinations. The 'rank' stated in the folder is the rank amongst ONLY those which were plotted, therefore it does not necessarily reflect the actual rank from the data.
 
-The PDF files are:
+The folders are:
 
-* ``(cluster)_combined.pdf``: compares discrete expression and continuous expression for each gene in a combination on a t-SNE plot.
-* ``(cluster)_discrete.pdf``: compares discrete expression of a gene combination with that of its components.
-* ``(cluster)_TP_TN.pdf``: plots true positive/negative rates of each gene.
-* ``(cluster)_singleton_combined.pdf``: same as the ``combined`` plot, but includes only singletons.
-* ``(cluster)_singleton_TP_TN.pdf``: same as the ``TP_TN`` plot, but includes only singletons.
-* ``(cluster)_discrete_trips.pdf``: compares discrete expression of a gene combination with that of its components, but there are three.
-* ``(cluster)_pair_histogram.pdf``: gives a bar graph of the top appearing genes in the pairs. Should give a good idea of the landscape of the best performing pairs.
+* ``(cluster)_pairs_as_singletons``: compares discrete expression and continuous expression for each gene in a combination on a t-SNE plot.
+* ``(cluster)_discrete_pairs``: compares discrete expression of a gene combination with that of its components.
+* ``(cluster)_pair_TP_TN``: plots true positive/negative rates of each gene.
+* ``(cluster)_singleton``: same as the ``combined`` plot, but includes only singletons.
+* ``(cluster)_singleton_TP_TN``: same as the ``TP_TN`` plot, but includes only singletons.
+* ``(cluster)_discrete_trios``: compares discrete expression of a gene combination with that of its components, but there are three.
 .. toctree::
