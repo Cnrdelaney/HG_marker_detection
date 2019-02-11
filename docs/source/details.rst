@@ -91,7 +91,7 @@ Ranking single genes and gene combinations according to their potential as marke
 7. Calculate true positive/negative.
 -------------------------------------
 
-Once COMET has ranked all gene combinations using the corresponding hypergeometric p-value, it reports True Positive and True Negative rates associated with each gene combination, using the matrix products found earlier. As a reminder, True Positive rate is found by dividing the number of expressing cells in the cluster by the total cell count of the cluster; true negative is found by dividing the number of expressing cells outside the cluster by the total cell count outside the cluster.
+Once COMET has ranked all gene combinations using the corresponding hypergeometric p-value, it reports True Positive and True Negative rates associated with each gene combination, using the matrix products found earlier. As a reminder, True Positive rate is found by dividing the number of expressing cells in the cluster by the total cell count of the cluster; true negative is found by dividing the number of non-expressing cells outside the cluster by the total cell count outside the cluster.
    
 
 8. Export statistical results.
