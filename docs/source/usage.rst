@@ -12,8 +12,8 @@ Before you use COMET with gene expression data, your data should be
 formatted into 3 files as shown below. The tables below are shown in excel format 
 for ease of view, but files should be given as plain text files.
 
-* ``markers.txt``: The expression matrix table stored as a TXT file (.txt). The first column
-  of the table lists cell names, while the first row
+* ``markers.txt``: The expression matrix table stored as a TXT file (.txt). The columns
+  of the table lists cell names, while the rows
   lists genes. The cell at the very top left should be
   blank. Each element in the rest of the table should contain a
   numerical gene expression value, corresponding to the row/cell and
@@ -42,7 +42,7 @@ for ease of view, but files should be given as plain text files.
 
 * ``gene_list``: A list of genes to use for filtering in your
   data. An optional addition, but when used COMET will only consider the genes submitted here.
-  By default COMET will use our own list of surface marking genes. Should be comma delimited.
+  By default COMET will use our own list of surface marking genes. Can be comma delimited on a single line or one gene per line, no commas.
 
 
 
