@@ -89,28 +89,67 @@ def read_data(cls_path, tsne_path, marker_path, gene_path, D):
     no_complement_marker_exp = pd.read_csv(
         marker_path,sep='\t', index_col=0
         ).rename_axis('cell',axis=1)
-    #gene list filtering
-            
-    no_complement_marker_exp = np.transpose(no_complement_marker_exp)
 
+    if no_complement_marker_exp.shape[1] == cls_ser.shape[0]:
+        pass
+    else:
+        for index,row in cls_ser.iteritems():
+            if str(index) in list(no_complement_marker_exp):
+                continue
+            else:
+                cls_ser.drop(labels=index,inplace=True)
+    
+    #gene list filtering
+    no_complement_marker_exp = np.transpose(no_complement_marker_exp)
+    no_complement_marker_exp.columns = [x.upper() for x in no_complement_marker_exp.columns]
     #gene filtering
     #-------------#
     if gene_path is None:
         pass
     else:
+
+        #read the genes
+        #Compatible with single line comma list OR one per line no commas OR mix of both
+        master_gene_list = []
         with open(gene_path, "r") as genes:
-            init_read = genes.read().splitlines()
-            master_str = str.upper(init_read[0])
-            master_gene_list = master_str.split(",")
-            for column_name in no_complement_marker_exp.columns:
-                if str.upper(column_name) in master_gene_list:
+            lines = genes.readlines()
+            if len(lines) == 1:
+                with open(gene_path, "r") as genes:
+                    init_read = genes.read().splitlines()
+                    master_str = str.upper(init_read[0])
+                    master_gene_list = master_str.split(",")
+            else:
+                for i, line in enumerate(lines):
+                    if '\n' in line:
+                        master_gene_list.append(line[:-1])
+                    else:
+                        master_gene_list.append(line)
+                for item in master_gene_list[:]:
+                    if ',' in item:
+                        new_split = item.split(",")
+                        master_gene_list.remove(item)
+                        for ele in new_split:
+                            master_gene_list.append(str.upper(ele))
+
+    
+        new_no_comp_mark_exp = pd.DataFrame()
+        for gene in master_gene_list:
+            try:
+                new_no_comp_mark_exp[gene] = no_complement_marker_exp[gene]
+            except:
+                pass
+
+        no_complement_marker_exp = new_no_comp_mark_exp
+        '''
+        for column_name in no_complement_marker_exp.columns:
+            if str.upper(column_name) in master_gene_list:
+                pass
+            else:
+                try:
+                    no_complement_marker_exp.drop(column_name, axis=1, inplace=True)
+                except:
                     pass
-                else:
-                    try:
-                        no_complement_marker_exp.drop(column_name, axis=1, inplace=True)
-                    except:
-                        pass
-                
+        '''
     #-------------#
 
     #downsampling
@@ -190,13 +229,6 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
     fc_test = hgmd.batch_fold_change(marker_exp, cls_ser, cls)
     print('Running XL-mHG on singletons...')
     xlmhg = hgmd.batch_xlmhg(marker_exp, cls_ser, cls, X=X, L=L)
-    '''
-    #print(xlmhg.to_string())
-    #tester = marker_exp['Reg4'].copy(deep=True)
-    
-    #tester.sort_values(inplace=True)
-    #print(xlmhg['mHG_cutoff'].to_string())
-    '''
     # We need to slide the cutoff indices before using them,
     # to be sure they can be used in the real world. See hgmd.mhg_slide()
     cutoff_value = hgmd.mhg_cutoff_value(
@@ -581,7 +613,6 @@ def main():
         )
     print("Generating complement data...")
     marker_exp = hgmd.add_complements(no_complement_marker_exp)
-    
     #throw out vals that show up in expression matrix but not in cluster assignments
     for ind,row in marker_exp.iterrows():
         if ind in cls_ser.index.values.tolist():
@@ -598,7 +629,6 @@ def main():
         else:
             cls_ser.drop(index,inplace=True)
     '''
-
     marker_exp.sort_values(by='cell',inplace=True)
     cls_ser.sort_index(inplace=True)
 
