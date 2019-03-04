@@ -4,6 +4,8 @@
 
 .. _website: http://www.cometsc.com/index
 
+.. _matplotlib: https://stackoverflow.com/questions/21784641/installation-issue-with-matplotlib-python
+
 Installation/Quickstart
 ========================
 
@@ -82,4 +84,12 @@ The optional statements are described as follows:
     be either 2 or 3. Will be extended to 4 gene combinations in the
     future.
     
+    
+Troubleshooting
+========================    
+
+There has been a known issue with the compatibility of matplotlib with certain installations. A fix that has been successful in most test cases can be found at matplotlib_ , consisting of changing the matplotlibrc 'backend' variable to either 'Agg' or 'TkAgg'.
+
+
+
 .. toctree::
