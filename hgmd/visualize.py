@@ -260,7 +260,7 @@ def make_plot(ax, title, coords, cmap, draw_cbar=False):
     """
     Make a single graph on ax with given specs.  Plots only absolute values.
     """
-    ax.set_title(title)
+    ax.set_title(title,fontdict={'fontsize':6})
     ax.set_xlabel('tSNE_1')
     ax.set_ylabel('tSNE_2')
     sc = ax.scatter(
@@ -295,13 +295,13 @@ def make_discrete_plots(tsne, discrete_exp, plot_genes, path,num):
     :returns: Nothing.
     """
     def make_quads_discrete_page(fig, ax_triple, titles, gene_1, gene_2, gene_3,gene_4):
-        """Make page with trips discrete plots given titles and genes."""
+        """Make page with quads discrete plots given titles and genes."""
         coords_df = tsne.merge(discrete_exp[[gene_1, gene_2, gene_3,gene_4]], on='cell')
         coords_df['pair'] = coords_df[gene_1] * coords_df[gene_2]
         coords_df['trips'] = coords_df[gene_1] * coords_df[gene_2] * coords_df[gene_3]
         coords_df['quads_fin'] = coords_df[gene_1] * coords_df[gene_2] * coords_df[gene_3] * coords_df[gene_4]
 
-        for (graph_index, z_label) in ((0, 'trips'), (1, gene_1), (2, gene_2), (3, gene_3), (4, gene_4)):
+        for (graph_index, z_label) in ((0, 'quads_fin'), (1, gene_1), (2, gene_2), (3, gene_3), (4, gene_4)):
             make_plot(
                 ax=ax_triple[graph_index],
                 title=titles[graph_index],

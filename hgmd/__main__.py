@@ -491,6 +491,7 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
 
     #if cls == fincls:
     # cls = 0
+    
     vis.make_plots(
         pair=ranked_pair,
         sing=sing_output,
@@ -509,6 +510,7 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
         quads_path=vis_path + 'cluster_' + str(cls) + '_discrete_quads',
         sing_tptn_path=vis_path + 'cluster_' + str(cls) + '_singleton_TP_TN'
         )
+    
     end_cls_time=time.time()
     print(str(end_cls_time - start_cls_time) + ' seconds')
     #time.sleep(10000)

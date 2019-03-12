@@ -15,6 +15,8 @@ import xlmhg as hg
 import scipy.stats as ss
 import time
 import math
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import log_loss
 
 # TODO: idea, replace 'gene_1', 'gene_2', and 'gene' columns with
 # indices/multi-indices
@@ -133,6 +135,34 @@ def batch_t(marker_exp, c_list, coi):
     :rtype: pandas.DataFrame
     """
 
+    def LRT_LogReg(df):
+        # Define model matrix and response
+        X = np.matrix(df.drop('cluster', axis=1))
+        y = df['cluster']
+        # Train logistic regression with full model
+        logreg1 = LogisticRegression().fit(X,y)
+        ll1 = -log_loss(y,logreg1.predict_proba(X),normalize=False)
+        # Train logistic regression with null model (only intercept)
+        logreg0 = LogisticRegression().fit([[0]]*len(X) ,y)
+        ll0 = -log_loss(y,logreg0.predict_proba(X),normalize=False)
+        # Likelihood ratio test
+        stat = 2*(ll1-ll0)
+        pval = ss.chi2.sf(stat, 1)
+        return(pval)
+    LRT_vals = []
+    for column in marker_exp:
+        #print(marker_exp[column].shape)
+        #print(c_list)
+        log_reg_in = pd.DataFrame(data=[marker_exp[column]])
+        log_reg_in = np.transpose(log_reg_in)
+        c_list_2 = np.array(c_list)
+        c_list_2 = np.array(c_list_2 == coi,dtype=int)
+        c_list_2 = np.transpose(c_list_2)
+        log_reg_in['cluster'] = c_list_2
+        
+        LRT_pval = LRT_LogReg(log_reg_in)
+        LRT_vals.append(LRT_pval)
+        
     t = marker_exp.apply(
         lambda col:
         ss.ttest_ind(
@@ -141,12 +171,26 @@ def batch_t(marker_exp, c_list, coi):
             equal_var=False
         )
     )
+    ws = marker_exp.apply(
+        lambda col:
+        ss.ranksums(
+            col[c_list == coi],
+            col[c_list != coi]
+        )
+    )
+    
     output = pd.DataFrame()
     output['gene_1'] = t.index
+    output['gene_1'] = ws.index
     output[['t_stat', 't_pval']] = pd.DataFrame(
         t.values.tolist(),
         columns=['t_stat', 't_pval']
     )
+    output[['w_stat', 'w_pval']] = pd.DataFrame(
+        ws.values.tolist(),
+        columns=['w_stat', 'w_pval']
+    )
+    output['LRT'] = LRT_vals
     return output
 
 
