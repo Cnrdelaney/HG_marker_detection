@@ -5,11 +5,12 @@ def read(filename):
     return open(os.path.join(os.path.dirname(__file__), filename)).read()
 
 setup(
-    name = 'HGMarkerDetection',
+    name = 'COMETSC',
     version = '1.1.1',
     long_description=read('README.md'),
     packages = ['hgmd'],
     install_requires=[
+        'adjustText==0.7.3' ,
         'atomicwrites==1.1.5' ,
         'attrs==18.1.0',
         'certifi==2018.4.16',
