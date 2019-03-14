@@ -134,7 +134,6 @@ def batch_t(marker_exp, c_list, coi):
 
     :rtype: pandas.DataFrame
     """
-    '''
     def LRT_LogReg(df):
         # Define model matrix and response
         X = np.matrix(df.drop('cluster', axis=1))
@@ -150,6 +149,7 @@ def batch_t(marker_exp, c_list, coi):
         pval = ss.chi2.sf(stat, 1)
         return(pval)
     LRT_vals = []
+    up_v_down_vals = []
     for column in marker_exp:
         #print(marker_exp[column].shape)
         #print(c_list)
@@ -159,9 +159,19 @@ def batch_t(marker_exp, c_list, coi):
         c_list_2 = np.array(c_list_2 == coi,dtype=int)
         c_list_2 = np.transpose(c_list_2)
         log_reg_in['cluster'] = c_list_2
+        in_cls = marker_exp[column][c_list == coi].values
+        total = marker_exp[column].values
+        total_mean = np.sum(total) / len(total)
+        in_cls_mean = np.sum(in_cls) / len(in_cls)
+        test = in_cls_mean - total_mean
+        if test <= 0:
+            up_v_down_vals.append('down')
+        else:
+            up_v_down_vals.append('up')
         
-        LRT_pval = LRT_LogReg(log_reg_in)
+        LRT_pval = 0#LRT_LogReg(log_reg_in)
         LRT_vals.append(LRT_pval)
+        
     
     t = marker_exp.apply(
         lambda col:
@@ -178,19 +188,20 @@ def batch_t(marker_exp, c_list, coi):
             col[c_list != coi]
         )
     )
-    '''
     output = pd.DataFrame()
     output['gene_1'] = t.index
-    #output['gene_1'] = ws.index
+    output['gene_1'] = ws.index
     output[['t_stat', 't_pval']] = pd.DataFrame(
         t.values.tolist(),
         columns=['t_stat', 't_pval']
     )
-    #output[['w_stat', 'w_pval']] = pd.DataFrame(
-    #    ws.values.tolist(),
-    #    columns=['w_stat', 'w_pval']
-    #)
-    #output['LRT'] = LRT_vals
+    output[['w_stat', 'w_pval']] = pd.DataFrame(
+        ws.values.tolist(),
+        columns=['w_stat', 'w_pval']
+    )
+
+    output['upvdown'] = up_v_down_vals
+    output['LRT'] = LRT_vals
     return output
 
 

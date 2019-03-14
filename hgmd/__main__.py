@@ -229,6 +229,7 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
     fc_test = hgmd.batch_fold_change(marker_exp, cls_ser, cls)
     print('Running XL-mHG on singletons...')
     xlmhg = hgmd.batch_xlmhg(marker_exp, cls_ser, cls, X=X, L=L)
+    
     # We need to slide the cutoff indices before using them,
     # to be sure they can be used in the real world. See hgmd.mhg_slide()
     cutoff_value = hgmd.mhg_cutoff_value(
@@ -422,23 +423,9 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
     count = 1
     for index,row in sing_output.iterrows():
         if count == 100:
-            if index == 'Cr2':
-                sing_output.at[index,'Plot'] = 1
-            elif index == 'Spn':
-                sing_output.at[index,'Plot'] = 1
-            elif index == 'Fas':
-                sing_output.at[index,'Plot'] = 1
-            else:
-                sing_output.at[index,'Plot'] = 0
-            continue
-        if row[0] >= .05:
-            sing_output.at[index,'Plot'] = 0
-        else:
-            if row[8] <= .15:
-                sing_output.at[index,'Plot'] = 0
-            else:
-                sing_output.at[index,'Plot'] = 1
-            count = count + 1
+            break
+        sing_output.at[index,'Plot'] = 1
+        count = count + 1
 
 
     
@@ -491,7 +478,6 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
 
     #if cls == fincls:
     # cls = 0
-    
     vis.make_plots(
         pair=ranked_pair,
         sing=sing_output,
@@ -510,7 +496,6 @@ def process(cls,X,L,plot_pages,cls_ser,tsne,marker_exp,gene_file,csv_path,vis_pa
         quads_path=vis_path + 'cluster_' + str(cls) + '_discrete_quads',
         sing_tptn_path=vis_path + 'cluster_' + str(cls) + '_singleton_TP_TN'
         )
-    
     end_cls_time=time.time()
     print(str(end_cls_time - start_cls_time) + ' seconds')
     #time.sleep(10000)
@@ -623,6 +608,12 @@ def main():
             marker_exp.drop(ind, inplace=True)
         #print(marker_exp.index.values.tolist().count(str(ind)))
         #print(marker_exp[index])
+
+    #throw out gene rows that are duplicates and print out a message to user
+    
+
+
+            
     '''
     #throw out cls_ser vals not in marker_exp
     for index in cls_ser.index.values.tolist():
@@ -639,30 +630,16 @@ def main():
     clusters = cls_ser.unique()
     clusters.sort()
     cluster_overall=clusters.copy()
-    '''
-    if clusters[0] == 0:
-        cluster_change = np.delete(clusters,0)
-        cluster_change_2 = np.append(cluster_change,cluster_change[-1]+1)
-        clusters = cluster_change_2
-        fin_clus = clusters[-1]
-        cls_ser.replace(0,fin_clus,inplace=True)
-    '''
-            #print(row)
+
     #Below could probably be optimized a little (new_clust not necessary),
-    #instead of new clust just go from (x-1)n to (x)n in clusters
-    #but it works for now and the complexity it adds is trivial and it makes debugging easier
     #cores is number of simultaneous threads you want to run, can be set at will
     cores = C
     cluster_number = len(clusters)
-    # if core number is bigger than number of clusters, just set it equal to number of clusters
+    # if core number is bigger than number of clusters, set it equal to number of clusters
     if cores > len(clusters):
         cores = len(clusters)
     #below loops allow for splitting the job based on core choice
     group_num  = math.ceil((len(clusters) / cores ))
-    #print(group_num)
-    #print(clusters)
-    #print(cluster_overall)
-    #time.sleep(1000)
     for element in range(group_num):
         new_clusters = clusters[:cores]
         print(new_clusters)
@@ -677,11 +654,8 @@ def main():
             jobs.append(p)
             p.start()
         p.join()
-        
-            #print(cls)
         new_clusters = []
         clusters = clusters[cores:len(clusters)]
-        #print(clusters)
 
     end_time = time.time()
 
