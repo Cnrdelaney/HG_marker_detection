@@ -17,6 +17,7 @@ import time
 import math
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import log_loss
+from . import qvalue
 
 # TODO: idea, replace 'gene_1', 'gene_2', and 'gene' columns with
 # indices/multi-indices
@@ -29,8 +30,8 @@ def add_complements(marker_exp):
     """Adds columns representing gene complement to a gene expression matrix.
 
     Gene complements are represented simplistically: gene expression values for
-    a given gene X are multiplied by -1 and become a new column, labeled X_c.
-    "High" expression values of X become "low" values of X_c, and vice versa,
+    a given gene X are multiplied by -1 and become a new column, labeled X_negation.
+    "High" expression values of X become "low" values of X_negation, and vice versa,
     where discrete expression corresponds to a "high" value, and discrete
     non-expression to a "low" value.
 
@@ -48,6 +49,7 @@ def add_complements(marker_exp):
     :rtype: pandas.DataFrame
     """
     for gene in marker_exp.columns:
+        #marker_exp[gene + '_negation'] = 1/(1+marker_exp[gene])
         marker_exp[gene + '_negation'] = -marker_exp[gene]
     '''
     for gene in marker_exp.columns:
@@ -73,28 +75,34 @@ def batch_xlmhg(marker_exp, c_list, coi, X=None, L=None):
     :returns: A matrix with arbitrary row indices, whose columns are the gene
               name, stat, cutoff, and pval outputs of the XL-mHG test; of
               float, int, and float type respectively.  Their names are 'gene',
-              'HG_stat', 'mHG_cutoff', and 'mHG_pval'.
+              'mHG_stat', 'mHG_cutoff', and 'mHG_pval'.
 
     :rtype: pandas.DataFrame
     """
     # * 1 converts to integer
     mem_list = (c_list == coi) * 1
-    count_n = 0
-    count_2n = 0
+    #count_n = 0
+    #count_2n = 0
+    #Count the number of cells in the cluster, store into count_n
+    count_n = np.sum(mem_list)
+    '''
     for cell in mem_list:
         if cell == 1:
             count_n = count_n + 1
         else:
             continue
-    count_2n = count_n * 2
+    '''
+    #Twice the number of cells in the cluster
+    #count_2n = count_n * 2
+    #Set X and L params
     if X is None:
         X = np.int(.15*count_n)
     if L is None:
-        if count_2n >= marker_exp.shape[0]:
+        if 2*count_n >= marker_exp.shape[0]:
             L = np.int(marker_exp.shape[0])
         else:
-            L = np.int(count_2n)
-        #L = marker_exp.shape[0]
+            L = np.int(2*count_n)
+       #L = marker_exp.shape[0]
     print('X = ' + str(X))
     print('L = ' + str(L))
     print('Cluster size ' + str(count_n))
@@ -108,18 +116,54 @@ def batch_xlmhg(marker_exp, c_list, coi, X=None, L=None):
             L=L
         )
     )
+    xlmhg_1 = marker_exp.apply(
+        lambda col:
+        hg.get_xlmhg_test_result(N=len(mem_list),
+                                     indices=np.array(np.where(np.array(mem_list.reindex(col.sort_values(ascending=False).index).values==1))[0],dtype='int64').astype('uint16')
+                                     ,X=X,L=L,pval_thresh=1e-12,escore_pval_thresh=1e-1,tol=1e-12).escore
+        )
     output = pd.DataFrame()
     output['gene_1'] = xlmhg.index
-    output[['HG_stat', 'mHG_cutoff', 'mHG_pval']] = pd.DataFrame(
+    output[['mHG_stat', 'mHG_cutoff', 'mHG_pval']] = pd.DataFrame(
         xlmhg.values.tolist(),
-        columns=['HG_stat', 'mHG_cutoff', 'mHG_pval']
+        columns=['mHG_stat', 'mHG_cutoff', 'mHG_pval']
     )
-    #time.sleep(100000)
+    '''
+    print(xlmhg_1)
+    output['escore'] = np.array(xlmhg_1,dtype=float)
+    output.fillna(0,inplace=True)
+    print(output.sort_values(by='escore', ascending=False))
+    time.sleep(1000)
+    '''
     return output
 
 
-def batch_t(marker_exp, c_list, coi):
-    """Applies t test to a gene expression matrix, gene by gene.
+
+def batch_q(xlmhg):
+    #Takes in the xlmhg dataframe which includes gene names and pvalue assignments
+    #Returns a list of q-value, corresponding to each gene
+    try:
+        q_vals = qvalue.estimate(np.array(xlmhg['mHG_pval']))
+    except:
+        print('error in qval calculation')
+    q_val_out = pd.DataFrame(data=xlmhg['gene_1'].tolist(),columns=['gene_1'])
+    q_val_out['q_value'] = q_vals
+
+    return q_val_out
+
+def pairs_q(pair):
+    try:
+        q_vals = qvalue.estimate(np.array(pair['HG_pval']))
+    except:
+        print('error in qval calculation')
+    q_val_out_pair = pd.DataFrame(data=pair['gene_1'].tolist(),columns=['gene_1'])
+    q_val_out_pair['gene_2'] = pair['gene_2']
+    q_val_out_pair['q_value'] = q_vals
+    return q_val_out_pair
+
+def batch_stats_extended(marker_exp, c_list, coi):
+    """Applies t test , wilcoxon test, and likelihood ratio test (Based on logistic regression)
+    to a gene expression matrix, gene by gene. Also gives simple up versus down regulation test (difference between means).
 
     :param marker_exp: A DataFrame whose rows are cell identifiers, columns are
         gene identifiers, and values are float values representing gene
@@ -130,7 +174,7 @@ def batch_t(marker_exp, c_list, coi):
 
     :returns: A matrix with arbitary row indices whose columns are the gene, t
               statistic, then t p-value; the last two being of float type.
-              Their names are 'gene', 't_stat' and 't_pval'.
+              Their names are 'gene', 't_stat' , 't_pval' , w_stat, w_pval , LRT_pval, up/down regulated
 
     :rtype: pandas.DataFrame
     """
@@ -148,11 +192,9 @@ def batch_t(marker_exp, c_list, coi):
         stat = 2*(ll1-ll0)
         pval = ss.chi2.sf(stat, 1)
         return(pval)
-    LRT_vals = []
+    LRT_pvals = []
     up_v_down_vals = []
     for column in marker_exp:
-        #print(marker_exp[column].shape)
-        #print(c_list)
         log_reg_in = pd.DataFrame(data=[marker_exp[column]])
         log_reg_in = np.transpose(log_reg_in)
         c_list_2 = np.array(c_list)
@@ -160,19 +202,18 @@ def batch_t(marker_exp, c_list, coi):
         c_list_2 = np.transpose(c_list_2)
         log_reg_in['cluster'] = c_list_2
         in_cls = marker_exp[column][c_list == coi].values
-        total = marker_exp[column].values
-        total_mean = np.sum(total) / len(total)
+        out_cls = marker_exp[column][c_list != coi].values
+        out_cls_mean = np.sum(out_cls) / len(out_cls)
         in_cls_mean = np.sum(in_cls) / len(in_cls)
-        test = in_cls_mean - total_mean
+        test = in_cls_mean - out_cls_mean
         if test <= 0:
             up_v_down_vals.append('down')
         else:
             up_v_down_vals.append('up')
         
-        LRT_pval = 0#LRT_LogReg(log_reg_in)
-        LRT_vals.append(LRT_pval)
+        LRT_pval = LRT_LogReg(log_reg_in)
+        LRT_pvals.append(LRT_pval)
         
-    
     t = marker_exp.apply(
         lambda col:
         ss.ttest_ind(
@@ -190,7 +231,7 @@ def batch_t(marker_exp, c_list, coi):
     )
     output = pd.DataFrame()
     output['gene_1'] = t.index
-    output['gene_1'] = ws.index
+    #output['gene_1'] = ws.index
     output[['t_stat', 't_pval']] = pd.DataFrame(
         t.values.tolist(),
         columns=['t_stat', 't_pval']
@@ -200,13 +241,60 @@ def batch_t(marker_exp, c_list, coi):
         columns=['w_stat', 'w_pval']
     )
 
-    output['upvdown'] = up_v_down_vals
-    output['LRT'] = LRT_vals
+    output['up_down'] = up_v_down_vals
+    output['LRT_pval'] = LRT_pvals
+    return output
+
+
+def batch_stats(marker_exp, c_list, coi):
+    """Applies t test & wilcoxon rank sum test to a gene expression matrix, gene by gene.
+
+    :param marker_exp: A DataFrame whose rows are cell identifiers, columns are
+        gene identifiers, and values are float values representing gene
+        expression.
+    :param c_list: A Series whose indices are cell identifiers, and whose
+        values are the cluster which that cell is part of.
+    :param coi: The cluster of interest.
+
+    :returns: A matrix with arbitary row indices whose columns are the gene, t
+              statistic, then t p-value; the last two being of float type.
+              Their names are 'gene', 't_stat' , 't_pval' , 'w_stat' , 'w_pval'
+
+    :rtype: pandas.DataFrame
+    """
+        
+    t = marker_exp.apply(
+        lambda col:
+        ss.ttest_ind(
+            col[c_list == coi],
+            col[c_list != coi],
+            equal_var=False
+        )
+    )
+    ws = marker_exp.apply(
+        lambda col:
+        ss.ranksums(
+            col[c_list == coi],
+            col[c_list != coi]
+        )
+    )
+    output = pd.DataFrame()
+    output['gene_1'] = t.index
+    #output['gene_1'] = ws.index
+    output[['t_stat', 't_pval']] = pd.DataFrame(
+        t.values.tolist(),
+        columns=['t_stat', 't_pval']
+    )
+    output[['w_stat', 'w_pval']] = pd.DataFrame(
+        ws.values.tolist(),
+        columns=['w_stat', 'w_pval']
+    )
+
     return output
 
 
 def batch_fold_change(marker_exp, c_list, coi):
-    """Applies log fold change to a gene expression matrix, gene by gene.
+    """Applies log2 fold change to a gene expression matrix, gene by gene.
 
     :param marker_exp: A DataFrame whose rows are cell identifiers, columns are
         gene identifiers, and values are float values representing gene
@@ -230,6 +318,8 @@ def batch_fold_change(marker_exp, c_list, coi):
         if val < 0:
             return abs(val)
         return val
+
+    
     fc = marker_exp.apply(
         lambda col:
         (math.log(fold_change(col,c_list,coi),2))
@@ -240,14 +330,14 @@ def batch_fold_change(marker_exp, c_list, coi):
         )
     output = pd.DataFrame()
     output['gene_1'] = fc.index
-    output[['FoldChange']] = pd.DataFrame(
+    output[['Log2FoldChange']] = pd.DataFrame(
         fc.values.tolist(),
-        columns=['FoldChange']
+        columns=['Log2FoldChange']
     )
     output['gene_1'] = fca.index
-    output[['FoldChangeAbs']] = pd.DataFrame(
+    output[['Log2FoldChangeAbs']] = pd.DataFrame(
         fca.values.tolist(),
-        columns=['FoldChangeAbs']
+        columns=['Log2FoldChangeAbs']
     )
     return output
 
@@ -284,7 +374,7 @@ def mhg_cutoff_value(marker_exp, cutoff_ind):
         val = marker_exp[gene].sort_values(
             ascending=False).iloc[row['mHG_cutoff']]
         if re.compile(".*_negation$").match(gene):
-            return val - FLOAT_PRECISION
+            return val + FLOAT_PRECISION
         else:
             return val + FLOAT_PRECISION
 
@@ -323,15 +413,20 @@ def mhg_slide(marker_exp, cutoff_val):
 
     :rtype: pandas.DataFrame
     """
+    def searcher(row):
+        if re.compile(".*_negation$").match(row['gene_1']):
+            val_ =  np.searchsorted(
+                -marker_exp[row['gene_1']].sort_values(ascending=False).values,
+                -row['cutoff_val'], side='left')
+        else:
+            val_ = np.searchsorted(
+                -marker_exp[row['gene_1']].sort_values(ascending=False).values,
+                -row['cutoff_val'], side='left')
+        
+        return val_
+        
     cutoff_val.index = cutoff_val['gene_1']
-    cutoff_ind = cutoff_val.apply(
-        lambda row:
-        np.searchsorted(
-            -marker_exp[row['gene_1']].sort_values(ascending=False).values,
-            -row['cutoff_val'], side='left'
-        ),
-        axis='columns'
-    )
+    cutoff_ind = cutoff_val.apply(lambda row: searcher(row),axis='columns')
     output = cutoff_val
     output['mHG_cutoff'] = cutoff_ind
     # Reorder and remove redundant row index
@@ -360,6 +455,9 @@ def discrete_exp(marker_exp, cutoff_val,trips_list):
     """
     output = pd.DataFrame()
     for gene in marker_exp.columns:
+        #if re.compile(".*_negation$").match(gene):
+        #    output[gene] = (abs(marker_exp[gene]) < abs(cutoff_val[gene])) * 1
+        #else:
         output[gene] = (marker_exp[gene] > cutoff_val[gene]) * 1
 
     if trips_list is not None:
@@ -377,7 +475,7 @@ def discrete_exp(marker_exp, cutoff_val,trips_list):
     return output
 
 
-def tp_tn(discrete_exp, c_list, coi, cluster_number, cluster_overall):
+def tp_tn(discrete_exp, c_list, coi, cluster_overall):
     """Finds simple true positive/true negative values for the cluster of
     interest.
 
@@ -427,14 +525,6 @@ def tp_tn(discrete_exp, c_list, coi, cluster_number, cluster_overall):
             np.dot(1 - mem_list, 1 - col.values) / np.sum(1 - mem_list)
         )
     )
-    '''
-    tp_tn = discrete_exp.apply(
-        lambda col: (
-            np.dot(mem_list, col.values) / np.sum(mem_list),
-            np.dot(1 - mem_list, 1 - col.values) / np.sum(1 - mem_list)
-        )
-    )
-    '''
     output = pd.DataFrame()
     output['gene_1'] = tp_tn.index
     output[['TP', 'TN']] = pd.DataFrame(
@@ -447,6 +537,8 @@ def tp_tn(discrete_exp, c_list, coi, cluster_number, cluster_overall):
 
 def pair_product(discrete_exp, c_list, coi, cluster_number, trips_list,cluster_overall):
     """Finds paired expression counts.  Returns in matrix form.
+
+    (Number of cells in which two genes are coexpressed)
 
     The product of the transpose of the discrete_exp DataFrame is a matrix
     whose rows and columns correspond to individual genes.  Each value is the
@@ -505,7 +597,6 @@ def pair_product(discrete_exp, c_list, coi, cluster_number, trips_list,cluster_o
     in_cls_matrix = discrete_exp[c_list == coi].values
     total_matrix = discrete_exp.values
     #get exp matrices for each non-interest cluster for new rank scheme
-    #(clstrs + 1 because range starts a list @ 0)
     cluster_exp_matrices = {}
     cls_counts = {}
     for clstrs in cluster_overall:
@@ -518,15 +609,9 @@ def pair_product(discrete_exp, c_list, coi, cluster_number, trips_list,cluster_o
 
     in_cls_count = np.size(in_cls_matrix, 0)
     pop_count = np.size(total_matrix, 0)
-    first = time.time()
-    #print(np.transpose(in_cls_matrix).shape)
-    #print(in_cls_matrix.shape)
     in_cls_product = np.matmul(np.transpose(in_cls_matrix), in_cls_matrix)
-    second = time.time()
-    #print(str(second-first) + 'pair in cls mult seconds')
     total_product = np.matmul(np.transpose(total_matrix), total_matrix)
     upper_tri_indices = np.triu_indices(gene_map.size,1)
-    #print(upper_tri_indices)
     
     return (
         gene_map,
@@ -683,14 +768,6 @@ def combination_product(discrete_exp,c_list,coi,trips_list):
     third = time.time()
     print(str(third-second) + ' out cls total')
     '''
-    #print(in_cls_matrix)
-    #print('')
-    #print(total_matrix)
-    #print('')
-    #print(trips_in_cls_product)
-    #print('')
-    #print(trips_total_product)
-
 
     #make a row-wise gene_map scheme
     gene_map = discrete_exp.columns.values
@@ -728,22 +805,6 @@ def combination_product(discrete_exp,c_list,coi,trips_list):
         gene_map = np.delete(gene_map,0)
     gene_2_mapped = pd.Index(gene_2_mapped)
 
-
-    
-
-
-    #print(gene_1_mapped)
-    #print(len(gene_1_mapped))
-    #print(gene_2_mapped)
-    #print(len(gene_2_mapped))
-    #print(gene_3_mapped)
-    #print(len(gene_3_mapped))
-    #time.sleep(10000)
-    #print(type(gene_2_mapped))
-    #print(discrete_exp.columns)
-    #print(type(discrete_exp.columns))
-    #time.sleep(10000)
-
     #indices for computation
     row_count = int((gene_count*(gene_count-1))/2)
     #column coordinate
@@ -764,16 +825,6 @@ def combination_product(discrete_exp,c_list,coi,trips_list):
     trips_indices = ( list_two , list_one )
     #print(trips_indices)
     fourth = time.time()
-    #print(str(fourth-third) + ' index and gene mapping time')
-    #print(gene_1_mapped)
-    #print(len(gene_1_mapped))
-    #print('')
-    #print(gene_2_mapped)
-    #print(len(gene_2_mapped))
-    #print('')
-    #print(trips_indices)
-    #print(trips_in_cls_product.shape)
-    #print(trips_total_product.shape)
     return (
         trips_in_cls_product,trips_total_product,trips_indices,
         gene_1_mapped,gene_2_mapped,gene_3_mapped
@@ -782,11 +833,17 @@ def combination_product(discrete_exp,c_list,coi,trips_list):
 
 def pair_hg(gene_map, in_cls_count, pop_count, in_cls_product, total_product,
             upper_tri_indices, abbrev):
-    """Finds hypergeometric statistic of gene pairs.
+    """Finds hypergeometric p-value of gene pairs.
 
     Takes in discrete single-gene expression matrix, and finds the
     hypergeometric p-value of the sample that includes cells which express both
-    of a pair of genes.
+    of a pair of genes. 
+
+    hypergeometric parameters:
+    k = in_cls_product (number of cells in cluster with coexpression of both genes in the given pair)
+    M = pop_count (total number of cells)
+    n = in_cls_count (number of cells in cluster)
+    N = total_product  (total number of cells with coexpression of both genes in the given pair)
 
     :param gene_map: An Index mapping index values to gene names.
     :param in_cls_count: The number of cells in the cluster.
@@ -802,51 +859,6 @@ def pair_hg(gene_map, in_cls_count, pop_count, in_cls_product, total_product,
     :rtype: pandas.DataFrame
 
     """
-
-    # maps the scipy hypergeom test over a numpy array
-    #vhg = np.vectorize(ss.hypergeom.sf, excluded=[1,3,4], otypes=[np.float])
-
-    #This gives us the matrix with one subtracted everywhere(zero
-    #lowest since cant have neg counts). With SF, this should give
-    #us prob that we get X cells or more
-    #altered_in_cls_product = np.copy(in_cls_product)
-    #for value in np.nditer(altered_in_cls_product,op_flags=['readwrite']):
-    #    if value == 0:
-    #        pass
-    #    else:
-    #        value[...] = value - 1
-    #print('here')
-    #print(in_cls_product)
-    #print(altered_in_cls_product)
-    #print(upper_tri_indices)
-    #altered_in_cls_product = altered_in_cls_product.transpose()
-
-    # Only apply to upper triangular
-    #hg_result = vhg(
-    #    in_cls_product[upper_tri_indices] ,
-    #    pop_count,
-        #in_cls_count,
-    #    total_product[upper_tri_indices],
-    #    in_cls_count,
-    #    loc=1
-    #)
-    #output = pd.DataFrame({
-    #    'gene_1': gene_map[upper_tri_indices[0]],
-    #    'gene_2': gene_map[upper_tri_indices[1]],
-    #    'HG_stat': hg_result
-    #}, columns=['gene_1', 'gene_2', 'HG_stat'])
-
-    #print('here')
-    #print(gene_map)
-    #return output
-
-
-    #print(in_cls_product.shape)
-    #print(total_product.shape)
-
-    #print(gene_map)
-    #print(total_product)
-    #time.sleep(10000)
     
     vhg = np.vectorize(ss.hypergeom.sf, excluded=[1, 2, 4], otypes=[np.float])
     ab = '2'
@@ -871,8 +883,8 @@ def pair_hg(gene_map, in_cls_count, pop_count, in_cls_product, total_product,
         output = pd.DataFrame({
             'gene_1': gene_map[revised_indices[0]],
             'gene_2': gene_map[revised_indices[1]],
-            'HG_stat': hg_result
-            }, columns=['gene_1', 'gene_2', 'HG_stat'])
+            'HG_pval': hg_result
+            }, columns=['gene_1', 'gene_2', 'HG_pval'])
         return output, revised_indices
 
     
@@ -884,22 +896,16 @@ def pair_hg(gene_map, in_cls_count, pop_count, in_cls_product, total_product,
             total_product[upper_tri_indices],
             loc=1
         )
-        #print(in_cls_product)
-        #print(in_cls_product[upper_tri_indices])
-        #print(total_product)
-        #print(total_product[upper_tri_indices])
-        #print(hg_result)
-        #print(gene_map)
         output = pd.DataFrame({
             'gene_1': gene_map[upper_tri_indices[0]],
             'gene_2': gene_map[upper_tri_indices[1]],
-            'HG_stat': hg_result
-        }, columns=['gene_1', 'gene_2', 'HG_stat'])
+            'HG_pval': hg_result
+        }, columns=['gene_1', 'gene_2', 'HG_pval'])
         return output, None
 
 
 
-def ranker(pair,xlmhg,sing_tp_tn,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in_cls_count):
+def ranker(pair,xlmhg,sing_tp_tn,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in_cls_count,pop_count):
     """
     :param pair: table w/ gene_1, gene_2, HG_stat as columns (DataFrame (DF) )
     :param xlmhg: DF of mHG stats for each gene(for testing lead vs follow gene in pair)
@@ -913,89 +919,59 @@ def ranker(pair,xlmhg,sing_tp_tn,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in
     **
 
     Statistic to calculate is :
-    MAX across all clusters of (TN_after - TN_before) / N
-    (In the future will add + TP term)
+    SUM across all clusters of (TN_after - TN_before) / N
     where:
-    TN_after = TN of gene combo
-    TN_before = TN of initial gene from pair
+    TN_after = TN of gene combo in cluster
+    TN_before = TN of initial gene from pair in cluster
     N = # of cells in the cluster
     
     THRESHOLDING:
-    -We are only gonna take the first 100 appearances for each gene in all the pairs
+    -We are only taking the first 100 appearances for each gene in all the pairs
     -'Lead' gene is one with smallest p val
-    -
 
     returns: New pair table w/ new columns and ranks.
     ranked-pair is a DEEP copy of pair, meaning value changes in it
     are not reflected in pair 
-    
-
-    TODO:
-
-    X - re-sort pair table by HG stat
-    X - give initial rank value based on this sort
-
-    X - compute our statistic for each pair
-    X - give a second rank value based on this best score
-
-    X - average two ranks for final rank
-    X - sort the table according to final rank
-    X - convert finrank from decimal to integer
-
-    ** so we will be adding 1+1+1+1 = 4 new columns **
-    (initrank, cluster_clean_score, CCSrank, rank)
-    
-    This then replaces the old 'pair' with a new 'pair'
-    which just gets passed along as usual
-    (minus the HG stat sort in the process loop)
     """
 
     def ranked_stat(gene_1,gene_2,lead_gene,cls_counts,other_pair_tp_tn,other_sing_tp_tn,in_cls_count):
         stats=[]
+        MGDstats=[]
         stats_debug = {}
-        #print(cls_counts)
         for clstrs in cls_counts:
-            #print(clstrs)
-            #this small cluster ignoring doesnt really matter when using
-            #the sum and not the max
-            #if cls_counts[clstrs] <= ( .05 * in_cls_count):
-            #    continue
-            #one = time.time()
             TN_before = other_sing_tp_tn[clstrs].at[lead_gene,'TN']
-            #two = time.time()
             TN_after = other_pair_tp_tn[clstrs].at[(gene_1,gene_2),'TN']
-            #three=time.time()
             N = cls_counts[clstrs]
-            value =  ( TN_after - TN_before ) / N 
+            #value =  ( TN_after - TN_before ) / N
+            value =  ( TN_after - TN_before )
             stats.append(value)
-            #stats_debug[clstrs] = value
+            MGDstats.append(((TN_after - TN_before)*N)/pop_count)
         stat1 = sum(stats)
+        MGDstat = sum(MGDstats)
         #stats.remove(stat1)
         #stat2 = max(stats)
         #stat= stat1+stat2
-        return stat1
+        return stat1,MGDstat
+
+    
     xlmhg_cop = xlmhg.copy()
     xlmhg_cop = xlmhg_cop.set_index('gene_1')
     ranked_pair = pair.copy()
-    ranked_pair.sort_values(by='HG_stat',ascending=True,inplace=True)
+    num_tests = len(ranked_pair)
+    ranked_pair.sort_values(by='HG_pval',ascending=True,inplace=True)
     ranked_pair['HG_rank'] = ranked_pair.reset_index().index + 1
-    #print(ranked_pair)
     
     #below not used because this does ALL pairs (too many)
     #ranked_pair['CCS'] = ranked_pair.apply(ranked_stat,axis=1,args=(cls_counts,other_pair_tp_tn,other_sing_tp_tn))
     omit_pairs = {}
     count = 1
-    #print(len(ranked_pair.index))
     if len(ranked_pair.index) < 5000:
         thresh = 100
     else:
         thresh = 1000
     loopstart = time.time()
+    
     for index,row in ranked_pair.iterrows():
-        #print(row[0])
-        #print(row[1])
-        
-           
         if row[0] in omit_pairs:
             if omit_pairs[row[0]] > 200:
                 ranked_pair.drop(index, inplace=True)
@@ -1008,8 +984,8 @@ def ranker(pair,xlmhg,sing_tp_tn,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in
         gene_1 = row[0]
         gene_2 = row[1]
         #determine which of the two genes is 'lead'
-        stat_1 = xlmhg_cop.at[gene_1,'HG_stat']
-        stat_2 = xlmhg_cop.at[gene_2,'HG_stat']
+        stat_1 = xlmhg_cop.at[gene_1,'mHG_pval']
+        stat_2 = xlmhg_cop.at[gene_2,'mHG_pval']
         if stat_1 <= stat_2:
             lead_gene=gene_1
             follow_gene = gene_2
@@ -1017,31 +993,12 @@ def ranker(pair,xlmhg,sing_tp_tn,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in
             lead_gene=gene_2
             follow_gene = gene_1
 
-        #if follow_gene[-2:] == '_c':
-        #    if row[-2] - sing_tp_tn.loc[(follow_gene),'TN'] < .1:
-        #        ranked_pair.drop(index, inplace=True)
-        #        print('COMPDROP')
-        #        continue
-        #after - before
-        #TN rate must improve by .5% at least
-        #TN_bef = sing_tp_tn.loc[(lead_gene),'TN']
-        #if row[-2] - TN_bef < .01:
-        #    ranked_pair.drop(index, inplace=True)
-            #print('TN drop')
-        #    continue
-        #before - after
-        #TP rate cannot decrease by more than 5%
-        #TP_bef = sing_tp_tn.loc[(lead_gene),'TP']
-        #if TP_bef-row[-3] < .0005:
-        #    ranked_pair.drop(index, inplace=True)
-        #    print('TP drop')
-        #continue
-
 
         if row[0] in omit_pairs:
             omit_pairs[row[0]] = omit_pairs[row[0]] + 1
         if row[1] in omit_pairs:
             omit_pairs[row[1]] = omit_pairs[row[1]] + 1
+            
         if row[0] not in omit_pairs:
             omit_pairs[row[0]] = 1
         if row[1] not in omit_pairs:
@@ -1050,31 +1007,16 @@ def ranker(pair,xlmhg,sing_tp_tn,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in
         if count == thresh:
             break
         
-        ranked_pair.at[index,'CCS'] = ranked_stat(gene_1,gene_2,lead_gene,cls_counts,other_pair_tp_tn,other_sing_tp_tn,in_cls_count)
-        '''
-        for key in stats_debug:
-            ranked_pair.loc[index,'CCS_cluster_'+str(key)] = stats_debug[key]
-        '''
+        ranked_pair.at[index,'CCS'],ranked_pair.at[index,'MGD'] = ranked_stat(gene_1,gene_2,lead_gene,cls_counts,other_pair_tp_tn,other_sing_tp_tn,in_cls_count)
         count = count + 1
-        #print(count)
 
-    #print(ranked_pair)
-    #time.sleep(10000)
     loopend = time.time()
     ranked_pair.sort_values(by='CCS',ascending=False,inplace=True)
-    #print(ranked_pair)
     ranked_pair['CCS_rank'] = ranked_pair.reset_index().index + 1
-    #print(ranked_pair)
-    #time.sleep(1000)
     ranked_pair['finalrank'] = ranked_pair[['HG_rank', 'CCS_rank']].mean(axis=1)
-    #print(ranked_pair)
     ranked_pair.sort_values(by='finalrank',ascending=True,inplace=True)
-    #print(ranked_pair)
     ranked_pair['rank'] = ranked_pair.reset_index().index + 1
-    #print(ranked_pair)
     ranked_pair.drop('finalrank',axis=1,inplace=True)
-    #print(ranked_pair)
-    #time.sleep(100)
     omit_genes = {}
     count = 0
     if len(ranked_pair.index) < 5000:
@@ -1082,16 +1024,18 @@ def ranker(pair,xlmhg,sing_tp_tn,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in
     else:
         plot_num = 100
     for index,row in ranked_pair.iterrows():
-        #print(row[3])
         if count == plot_num:
             break
+        #If a gene has appeared more than 10 times, dont plot anymore
         if row[0] in omit_genes:
             if omit_genes[row[0]] >= 10:
                 ranked_pair.at[index,'Plot'] = 0
             else:
-                if row[2] >= .05:
+                # test if the non-adjusted pvalue is less than .05
+                if row[2]  >= .05:
                     ranked_pair.at[index,'Plot'] = 0
                 else:
+                    #If true positive rate is less than 15%, dont plot
                     if row[3] <= .15:
                         ranked_pair.at[index,'Plot'] = 0
                     else:
@@ -1105,8 +1049,6 @@ def ranker(pair,xlmhg,sing_tp_tn,other_sing_tp_tn,other_pair_tp_tn,cls_counts,in
             else:
                 ranked_pair.at[index,'Plot'] = 1
             count = count + 1
-
-    #print(ranked_pair)
     pop_list = []
     for key, value in omit_pairs.items():
         if value <= 20:
@@ -1168,7 +1110,6 @@ def pair_tp_tn(gene_map, in_cls_count, pop_count, in_cls_product,
         return output
         
     else:
-
         tp_result = np.vectorize(tp)(in_cls_product[upper_tri_indices])
         tn_result = np.vectorize(tn)(
             in_cls_product[upper_tri_indices], total_product[upper_tri_indices]
